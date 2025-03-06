@@ -256,6 +256,16 @@ public class FlverMeshPropertyView
 
             ImGui.EndTable();
         }
+
+        // Draw a rectangle spanning two columns
+        ImGui.TableNextRow();
+        ImGui.TableSetColumnIndex(0);
+
+        var drawList = ImGui.GetWindowDrawList();
+        var pos = ImGui.GetCursorScreenPos();
+        var size = ImGui.GetContentRegionAvail();
+        var color = ImGui.GetColorU32(new Vector4(1.0f, 0.0f, 0.0f, 1.0f));
+        drawList.AddRectFilled(pos, new Vector2(pos.X + size.X, pos.Y + 200), color);
     }
 
     private void DisplayFaceSetProperties(FLVER2.FaceSet faceset, int index)

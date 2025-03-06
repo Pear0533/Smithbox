@@ -51,10 +51,6 @@ public static class VertexUtils
         foreach (var vertex in curMesh.Vertices)
         {
             float tangentW = vertex.Tangents[0].W;
-            if(vertex.Tangents[0].W == 0)
-            {
-                tangentW = -1;
-            }
 
             if (axis is RotationAxis.X)
             {
@@ -93,7 +89,7 @@ public static class VertexUtils
                 {
                     var tangentX = vertex.Tangents[0].X * cos - vertex.Tangents[0].Z * sin;
                     var tangentY = vertex.Tangents[0].Y;
-                    var tangentZ = vertex.Tangents[0].X * sin + vertex.Tangents[0].Z * cos;
+                    var tangentZ = -vertex.Tangents[0].X * sin + vertex.Tangents[0].Z * cos;
 
                     vertex.Tangents[0] = new Vector4(tangentX, tangentY, tangentZ, tangentW);
                 }
