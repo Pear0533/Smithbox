@@ -246,7 +246,7 @@ public class ModelViewportManager
             ImGui.TextWrapped(isVisible ? ForkAwesome.Eye : ForkAwesome.EyeSlash);
             ImGui.PopStyleColor();
 
-            if (ImGui.IsItemHovered() && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
+            if (ImGui.IsItemHovered() && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
             {
                 // Quick-tool all if this key is down
                 if (InputTracker.GetKey(KeyBindings.Current.MODEL_ToggleVisibility))
@@ -314,7 +314,7 @@ public class ModelViewportManager
             ImGui.TextWrapped(isVisible ? ForkAwesome.Eye : ForkAwesome.EyeSlash);
             ImGui.PopStyleColor();
 
-            if (ImGui.IsItemHovered() && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
+            if (ImGui.IsItemHovered() && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
             {
                 // Quick-tool all if this key is down
                 if (InputTracker.GetKey(KeyBindings.Current.MODEL_ToggleVisibility))
@@ -381,7 +381,7 @@ public class ModelViewportManager
             ImGui.TextWrapped(isVisible ? ForkAwesome.Eye : ForkAwesome.EyeSlash);
             ImGui.PopStyleColor();
 
-            if (ImGui.IsItemHovered() && ImGui.IsMouseDoubleClicked(ImGuiMouseButton.Left))
+            if (ImGui.IsItemHovered() && ImGui.IsMouseClicked(ImGuiMouseButton.Left))
             {
                 // Quick-tool all if this key is down
                 if (InputTracker.GetKey(KeyBindings.Current.MODEL_ToggleVisibility))
