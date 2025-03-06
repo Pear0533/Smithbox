@@ -389,12 +389,12 @@ public class DebugPrimitiveRenderableProxy : RenderableProxy
         colmat.Color = _renderOutline ? HighlightedColor : BaseColor;
         _materialBuffer.FillBuffer(gd, cl, ref colmat);
 
-        // Selectable
-        _renderablesSet.cSelectables[_renderable] = _selectable;
-
         // Visible
         if (_renderable != -1)
         {
+            // Selectable
+            _renderablesSet.cSelectables[_renderable] = _selectable;
+
             _renderablesSet.cVisible[_renderable]._visible = _visible;
             _renderablesSet.cSceneVis[_renderable]._renderFilter = _drawfilter;
             _renderablesSet.cSceneVis[_renderable]._drawGroup = _drawgroups;
@@ -403,21 +403,12 @@ public class DebugPrimitiveRenderableProxy : RenderableProxy
 
     public override unsafe void UpdateRenderables(GraphicsDevice gd, CommandList cl, SceneRenderPipeline sp)
     {
-        if (_materialBuffer == null)
-        {
-            _materialBuffer =
-                Renderer.MaterialBufferAllocator.Allocate((uint)sizeof(DbgMaterial), sizeof(DbgMaterial));
-        }
+        if (_materialBuffer == null || _worldBuffer == null) return;
 
         InstanceData dat = new();
         dat.WorldMatrix = _world;
         dat.MaterialID = _materialBuffer.AllocationStart / (uint)sizeof(DbgMaterial);
         dat.EntityID = GetPackedEntityID(_renderablesSet.RenderableSystemIndex, _renderable);
-        if (_worldBuffer == null)
-        {
-            _worldBuffer =
-                Renderer.UniformBufferAllocator.Allocate((uint)sizeof(InstanceData), sizeof(InstanceData));
-        }
 
         _worldBuffer.FillBuffer(gd, cl, ref dat);
 

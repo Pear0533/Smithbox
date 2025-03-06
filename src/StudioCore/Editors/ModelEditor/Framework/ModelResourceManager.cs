@@ -981,6 +981,7 @@ public class ModelResourceManager : IResourceEventListener
 
             _Flver_RenderMesh = meshRenderableProxy;
             _Flver_RenderMesh.Visible = true;
+            GC.Collect();
         }
     }
 

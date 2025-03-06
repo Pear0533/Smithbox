@@ -216,7 +216,7 @@ public class Renderer
         var workdone = 0;
         // We will aim to complete the background work in 12 miliseconds to try and maintain at least 30-60 FPS when loading,
         // but we will process a minimum of 500 items per frame to ensure forward progress when loading.
-        while (LowPriorityBackgroundUploadQueue.Count() > 0 && (workdone < 500 || sw.ElapsedMilliseconds <= 12))
+        while (LowPriorityBackgroundUploadQueue.Count() > 0 && (workdone < 500 || sw.ElapsedMilliseconds <= 500))
         {
             LowPriorityBackgroundUploadQueue.Dequeue()?.Invoke(Device, mainCommandList);
             workdone++;

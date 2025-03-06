@@ -145,6 +145,11 @@ public class FlverMeshPropertyView
             }
         }
 
+        if (ImGui.CollapsingHeader("UVs"))
+        {
+            DisplayUvProperties(entry.Vertices);
+        }
+
         DisplayMeshAdjustments(entry);
     }
 
@@ -218,7 +223,6 @@ public class FlverMeshPropertyView
 
             // Y rotation doesn't work currently
             // Row 4
-            /* 
             ImGui.TableNextRow();
             ImGui.TableSetColumnIndex(0);
 
@@ -233,7 +237,6 @@ public class FlverMeshPropertyView
 
             ImGui.SetNextItemWidth(ImGui.GetColumnWidth());
             ImGui.InputFloat("##rotateInputY", ref StoredRotationInput_Y);
-            */
 
             // Row 5
             ImGui.TableNextRow();
@@ -387,7 +390,99 @@ public class FlverMeshPropertyView
         vertexBuffer.LayoutIndex = layoutIndex;
     }
 
-    private void DisplayBoundingBoxProperties(FLVER2.Mesh.BoundingBoxes boundingBox)
+    // TODO: Use the editor action manager...
+    // TODO: Cleanup (Pear)
+
+    private int _selectedUvChannel = -1;
+
+    private void MirrorUVs(IEnumerable<FLVER.Vertex> vertices, bool mirrorX)
+    {
+        int index = _selectedUvChannel;
+        foreach (FLVER.Vertex vertex in vertices)
+        {
+            Vector3 v = vertex.UVs[index];
+            Vector3 flippedVector = mirrorX
+                ? v with { X = -v.X }
+                : v with { Y = -v.Y };
+            vertex.UVs[index] = flippedVector;
+        }
+    }
+
+private void DisplayUvProperties(IReadOnlyList<FLVER.Vertex> vertices)
+{
+    List<string> uvChannelNames = new();
+    for (int i = 0; i < vertices[0].UVs.Count; i++)
+    {
+        uvChannelNames.Add($"UV{i}");
+    }
+
+    // Render UV Channel Selection UI
+    ImGui.Columns(2);
+    ImGui.AlignTextToFramePadding();
+    ImGui.Text("UV Channel");
+    UIHelper.ShowHoverTooltip("Select which UV channel to edit.");
+    ImGui.NextColumn();
+    
+    if (ImGui.BeginCombo($"##UVChannelSelector", _selectedUvChannel >= 0 ? uvChannelNames[_selectedUvChannel] : "None"))
+    {
+        foreach ((string uvName, int index) in uvChannelNames.Select((name, idx) => (name, idx)))
+        {
+            bool isSelected = (_selectedUvChannel == index);
+            if (index != -1 && ImGui.Selectable(uvName, isSelected))
+            {
+                _selectedUvChannel = index;
+            }
+        }
+        ImGui.EndCombo();
+    }
+
+    // Render UV Actions (Mirror Buttons)
+    if (_selectedUvChannel >= 0)
+    {
+        if (ImGui.Button($"Mirror {uvChannelNames[_selectedUvChannel]} on X"))
+        {
+            MirrorUVs(vertices, true);
+        }
+        ImGui.SameLine();
+        if (ImGui.Button($"Mirror {uvChannelNames[_selectedUvChannel]} on Y"))
+        {
+            MirrorUVs(vertices, false);
+        }
+
+        // For testing purposes: Show first vertex UV
+        ImGui.NewLine();
+        ImGui.Text($"First Vertex UV: {vertices[0].UVs[_selectedUvChannel]}");
+    }
+
+    // Render the Palette Grid (using CGRam data)
+    var PalZoom = 4; // scaleable
+    var CGRam = new uint[256]; // data (assuming it’s set somewhere)
+    var drawList = ImGui.GetWindowDrawList();
+
+    for (int r = 0; r < 16; r++)
+    {
+        for (int c = 0; c < 16; c++)
+        {
+            // Get position of the current grid cell
+            var p = ImGui.GetCursorScreenPos();
+            var x = p.X + (c * PalZoom);
+            var y = p.Y + (r * PalZoom);
+
+            // Draw the colored rectangle for this grid cell
+            drawList.AddRectFilled(
+                new Vector2(x, y), // rect start position
+                new Vector2(x + PalZoom, y + PalZoom), // rect end position
+                CGRam[(r * 16) + c]); // index into data directly
+        }
+    }
+
+    // Dummy element to provide spacing for the grid
+    ImGui.Dummy(new Vector2(PalZoom * 16, PalZoom * 16f));
+
+    ImGui.Columns(1); // Reset columns back to default
+}
+
+private void DisplayBoundingBoxProperties(FLVER2.Mesh.BoundingBoxes boundingBox)
     {
         var bbMin = boundingBox.Min;
         var bbMax = boundingBox.Max;
