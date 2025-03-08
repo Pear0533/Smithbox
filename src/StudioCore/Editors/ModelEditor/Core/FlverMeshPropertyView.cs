@@ -412,8 +412,8 @@ public class FlverMeshPropertyView
         {
             Vector3 v = vertex.UVs[index];
             Vector3 flippedVector = mirrorX
-                ? v with { X = -v.X }
-                : v with { Y = -v.Y };
+                ? v with { X = -v.X + 1 }
+                : v with { Y = -v.Y + 1 };
             vertex.UVs[index] = flippedVector;
         }
     }
