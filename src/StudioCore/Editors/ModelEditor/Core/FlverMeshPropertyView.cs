@@ -1,4 +1,4 @@
-﻿using ImGuiNET;
+using ImGuiNET;
 using SoulsFormats;
 using StudioCore.Editors.ModelEditor.Actions;
 using StudioCore.Editors.ModelEditor.Actions.Mesh;
@@ -490,6 +490,22 @@ private void DisplayUvProperties(IReadOnlyList<FLVER.Vertex> vertices)
     ImGui.Dummy(new Vector2(PalZoom * 16, PalZoom * 16f));
 
     ImGui.Columns(1); // Reset columns back to default
+
+
+        // Draw a rectangle spanning two columns
+        var pos = ImGui.GetCursorScreenPos();
+        var size = ImGui.GetContentRegionAvail();
+        float UVHeight = size.X;
+        drawList.AddRectFilled(pos, new Vector2(pos.X + size.X, pos.Y + UVHeight), ImGui.GetColorU32(ImGuiCol.Button));
+        drawList.AddRect(pos, new Vector2(pos.X + size.X, pos.Y + UVHeight), ImGui.GetColorU32(ImGuiCol.Border));
+
+        foreach (var point in vertices.SelectMany(x => x.UVs))
+        {
+            drawList.AddCircleFilled(new Vector2(pos.X + size.X * point.X, pos.Y + UVHeight * point.Y), 2.0f, 0xFF00FF00); // Green points
+        }
+
+        // Extend the scroll area by 200 pixels
+        ImGui.Dummy(new Vector2(0, UVHeight));
 }
 
 private void DisplayBoundingBoxProperties(FLVER2.Mesh.BoundingBoxes boundingBox)
