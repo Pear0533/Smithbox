@@ -1,14 +1,9 @@
 #--------------------------------------
 # PRIORITY
 #--------------------------------------
-- FIX FIX FIX: map editor state is messed up on map reload
-    Currently: 
-        - initial map load is fine, entities associate with the MSB data correctly.
-        - unload occurs, visually entities are unloaded (but seemingly not removed internally)
-        - reload occurs: visually entities are now connected to initial map load MSB entities, but the content view has new invisible MSB entities
+- FIX: map viewport is desynced from map content after unload and reload
+ - Note: perhaps LoadedObjectContainer usage needs to be changed to MapListView.ContentViews -> Container in some places
 
-    - Issue likely linked to how LoadMap is filling the MapContainer (ObjectContainer) entities
-    
 #--------------------------------------
 # General
 #--------------------------------------
@@ -37,8 +32,6 @@
  - SDT
  - DS3
  - BB
-- FEAT: action to copy AtkParam/BehaviorParam row into _PC version (vice versa)
-- FEAT: action to revert selected row to vanilla data
 - FEAT: add create text entry group for selection (e.g. new weapon infusion).
 
 - FIX: correct row index support in the Param Editor in places where it doesn't function correctly (e.g. row name import)

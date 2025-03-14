@@ -231,6 +231,7 @@ public class CFG
     //****************************
     // Settings: Map Editor
     //****************************
+    public bool MapEditor_EnableMapUnload = true;
     public bool MapEditor_IgnoreSaveExceptions = false;
 
     public bool MapEditor_DisplayMapCategories = true;
@@ -369,7 +370,6 @@ public class CFG
     public bool Param_DisplayParamCategories = true;
 
     public bool Param_AdvancedMassedit = false;
-    public bool Param_AllowRowReorder = false;
     public bool Param_AllowFieldReorder = true;
     public bool Param_DisableLineWrapping = false;
     public bool Param_DisableRowGrouping = false;
@@ -402,6 +402,9 @@ public class CFG
 
     public bool Param_MassEdit_ShowAddButtons = true;
 
+    public float Param_ParamContextMenu_Width = 300f;
+
+    public float Param_RowContextMenu_Width = 300f;
     public bool Param_RowContextMenu_NameInput = true;
     public bool Param_RowContextMenu_ShortcutTools = true;
     public bool Param_RowContextMenu_PinOptions = true;
@@ -409,6 +412,7 @@ public class CFG
     public bool Param_RowContextMenu_ReverseLoopup = true;
     public bool Param_RowContextMenu_CopyID = true;
 
+    public float Param_FieldContextMenu_Width = 300f;
     public bool Param_FieldContextMenu_Split = false;
     public bool Param_FieldContextMenu_Name = false;
     public bool Param_FieldContextMenu_Description = false;
@@ -634,6 +638,7 @@ public class CFG
     public bool CutsceneAtlas_ShowTags = true;
     public bool MovieAtlas_ShowTags = true;
     public bool TimeActAtlas_ShowTags = true;
+    public bool TalkAtlas_ShowTags = true;
 
     //****************************
     // Map Toolbar

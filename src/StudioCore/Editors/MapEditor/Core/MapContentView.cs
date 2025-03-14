@@ -7,11 +7,7 @@ using StudioCore.Editors.MapEditor.Actions.Viewport;
 using StudioCore.Editors.MapEditor.Enums;
 using StudioCore.Editors.MapEditor.Framework;
 using StudioCore.Editors.MapEditor.Helpers;
-using StudioCore.Editors.ModelEditor.Enums;
-using StudioCore.Editors.ModelEditor.Utils;
-using StudioCore.Editors.ParamEditor.Actions;
 using StudioCore.Interface;
-using StudioCore.MsbEditor;
 using StudioCore.Platform;
 using StudioCore.Resource.Locators;
 using StudioCore.Scene.Interfaces;
@@ -20,11 +16,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
-using System.Text;
-using System.Threading.Tasks;
 using Veldrid;
-using static HKLib.hk2018.hkaiUserEdgeUtils;
-using static SoulsFormats.NVA;
 
 namespace StudioCore.Editors.MapEditor.Core;
 
@@ -45,8 +37,6 @@ public class MapContentView
 
     public MapContentViewType ContentViewType = MapContentViewType.ObjectType;
     public MapContentLoadState ContentLoadState = MapContentLoadState.Unloaded;
-
-    private string SearchBarText = "";
 
     private bool _setNextFocus;
     private ISelectable _pendingClick;
@@ -72,10 +62,15 @@ public class MapContentView
 
         Selection.ClearSelection();
         Screen.Universe.LoadMap(MapID, selected);
+        Container = Screen.Universe.GetObjectContainerForMap(MapID);
 
-        if (Container == null)
+        // Reveal hidden entities if "Allow map unload" is false 
+        if (!CFG.Current.MapEditor_EnableMapUnload)
         {
-            Container = Screen.Universe.GetObjectContainerForMap(MapID);
+            foreach (var entry in Container.Objects)
+            {
+                entry.EditorVisible = true;
+            }
         }
     }
 
@@ -83,17 +78,32 @@ public class MapContentView
     {
         ContentLoadState = MapContentLoadState.Unloaded;
 
-        Screen.EntityTypeCache.RemoveMapFromCache(this);
+        // Unload
+        if (CFG.Current.MapEditor_EnableMapUnload)
+        {
+            Screen.EntityTypeCache.RemoveMapFromCache(this);
 
-        Selection.ClearSelection();
-        EditorActionManager.Clear();
+            Selection.ClearSelection();
+            EditorActionManager.Clear();
 
-        if (Container != null)
-            Screen.Universe.UnloadContainer(Container);
+            if (Container != null)
+            {
+                Screen.Universe.UnloadContainer(Container, true);
+            }
 
-        GC.Collect();
-        GC.WaitForPendingFinalizers();
-        GC.Collect();
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+        }
+        // Option to ignore unloading and just keep map in memory
+        else
+        {
+            // Hide entities if "Allow map unload" is false
+            foreach (var entry in Container.Objects)
+            {
+                entry.EditorVisible = false;
+            }
+        }
     }
 
     /// <summary>

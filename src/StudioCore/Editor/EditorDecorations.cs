@@ -208,7 +208,7 @@ public class EditorDecorations
         foreach (ParamRef r in paramRefs)
         {
             Param.Cell? c = context?[r.ConditionField];
-            var inactiveRef = context != null && c != null && Convert.ToInt32(c.Value.Value) != r.ConditionValue;
+            var inactiveRef = context != null && c != null && Convert.ToUInt32(c.Value.Value) != r.ConditionValue;
             if (inactiveRef)
             {
                 inactiveRefs.Add(r.ParamName);
@@ -400,7 +400,7 @@ public class EditorDecorations
         foreach (ParamRef rf in paramRefs)
         {
             Param.Cell? c = context?[rf.ConditionField];
-            var inactiveRef = context != null && c != null && Convert.ToInt32(c.Value.Value) != rf.ConditionValue;
+            var inactiveRef = context != null && c != null && Convert.ToUInt32(c.Value.Value) != rf.ConditionValue;
             if (inactiveRef)
             {
                 continue;
@@ -1222,7 +1222,7 @@ public class EditorDecorations
     public static void ParamRefReverseLookupSelectables(EditorScreen screen, ParamBank bank, string currentParam,
         int currentID)
     {
-        if (ImGui.BeginMenu("Search for references..."))
+        if (ImGui.BeginMenu("Search for references"))
         {
             Dictionary<string, List<(string, ParamRef)>> items = UICache.GetCached(screen, (bank, currentParam),
                 () => ParamRefReverseLookupFieldItems(bank, currentParam));
@@ -1415,23 +1415,6 @@ public class EditorDecorations
             T nextKey = sourceListToModify[indexOfPin + 1];
             sourceListToModify[indexOfPin] = nextKey;
             sourceListToModify[indexOfPin + 1] = currentElement;
-        }
-    }
-    
-    public static void ListReorderOptions<T>(List<T> sourceListToModify, T currentElement, int index = -1)
-    {
-        if (index == -1) index = sourceListToModify.IndexOf(currentElement);
-        if (index > 0 && ImGui.Selectable("Move up"))
-        {
-            T prevKey = sourceListToModify[index - 1];
-            sourceListToModify[index] = prevKey;
-            sourceListToModify[index - 1] = currentElement;
-        }
-        if (index >= 0 && index < sourceListToModify.Count - 1 && ImGui.Selectable("Move down"))
-        {
-            T nextKey = sourceListToModify[index + 1];
-            sourceListToModify[index] = nextKey;
-            sourceListToModify[index + 1] = currentElement;
         }
     }
 

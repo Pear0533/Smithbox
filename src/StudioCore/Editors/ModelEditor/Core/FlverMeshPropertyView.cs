@@ -221,7 +221,6 @@ public class FlverMeshPropertyView
             ImGui.SetNextItemWidth(ImGui.GetColumnWidth());
             ImGui.InputFloat("##rotateInputX", ref StoredRotationInput_X);
 
-            // Y rotation doesn't work currently
             // Row 4
             ImGui.TableNextRow();
             ImGui.TableSetColumnIndex(0);

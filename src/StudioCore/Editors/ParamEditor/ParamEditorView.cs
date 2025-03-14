@@ -5,6 +5,7 @@ using SoulsFormats;
 using StudioCore.Configuration;
 using StudioCore.Core.Project;
 using StudioCore.Editor;
+using StudioCore.Editors.ParamEditor.Framework;
 using StudioCore.Interface;
 using StudioCore.Platform;
 using StudioCore.Tools.Generation;
@@ -134,24 +135,7 @@ public class ParamEditorView
                         EditorCommandQueue.AddCommand($@"param/view/{_viewIndex}/{paramKey}");
                     }
 
-                    if (ImGui.BeginPopupContextItem())
-                    {
-                        if (ImGui.Selectable("Unpin " + paramKey))
-                        {
-                            Smithbox.ProjectHandler.CurrentProject.Config.PinnedParams.Remove(paramKey);
-                        }
-
-                        EditorDecorations.PinListReorderOptions(Smithbox.ProjectHandler.CurrentProject.Config.PinnedParams, paramKey);
-
-                        if (ImGui.Selectable("Unpin all"))
-                        {
-                            Smithbox.ProjectHandler.CurrentProject.Config.PinnedParams.RemoveAll(x => true);
-                        }
-
-                        ImGui.EndPopup();
-                    }
-
-                    DisplayDS2MapNameAlias(paramKey);
+                    ParamEntryContextMenu.Display(p, paramKey, true);
 
                     ImGui.Unindent(15.0f * scale);
                 }
@@ -332,53 +316,7 @@ public class ParamEditorView
             }
 
             // Context Menu
-            if (ImGui.BeginPopupContextItem())
-            {
-                if (ImGui.Selectable("Pin " + paramKey) &&
-                    !Smithbox.ProjectHandler.CurrentProject.Config.PinnedParams.Contains(paramKey))
-                {
-                    Smithbox.ProjectHandler.CurrentProject.Config.PinnedParams.Add(paramKey);
-                }
-
-                if (ImGui.Selectable("Copy Param Name"))
-                {
-                    PlatformUtils.Instance.SetClipboardText(paramKey);
-                }
-
-                // WIKI - Make false to disable
-                if (CFG.Current.EnableWikiTools)
-                {
-                    if (ImGui.Selectable("Export Param Table"))
-                    {
-                        DokuWikiHelper.OutputParamTableInformation();
-                    }
-
-                    if (ImGui.Selectable("Export Specific Param Wiki Table"))
-                    {
-                        DokuWikiHelper.OutputParamInformation(paramKey);
-                    }
-                }
-
-                if (ParamEditorScreen.EditorMode && p != null)
-                {
-                    var meta = ParamMetaData.Get(p.AppliedParamdef);
-
-                    if (meta != null && meta.Wiki == null && ImGui.MenuItem("Add wiki..."))
-                    {
-                        meta.Wiki = "Empty wiki...";
-                    }
-
-                    if (meta?.Wiki != null && ImGui.MenuItem("Remove wiki"))
-                    {
-                        meta.Wiki = null;
-                    }
-                }
-
-                ImGui.EndPopup();
-            }
-
-            // Map alias
-            //DisplayDS2MapNameAlias(paramKey);
+            ParamEntryContextMenu.Display(p, paramKey);
 
             ImGui.Unindent(15.0f * scale);
         }
@@ -657,53 +595,7 @@ public class ParamEditorView
                 // Rows
                 var selectionCache = _selection.GetSelectionCache(rows, "regular");
                 
-                bool allowReorder = CFG.Current.Param_AllowRowReorder;
-                if (!CFG.Current.Param_PinGroups_ShowOnlyPinnedRows && allowReorder)
-                {
-                    List<string> rowOrder;
-                    if (!(meta?.AlternateRowOrders?.TryGetValue(activeParam, out var defRowOrder) ?? false))
-                    {
-                        rowOrder = [];
-                        defRowOrder = null;
-                    }
-                    else
-                    {
-                        rowOrder = [..defRowOrder];
-                    }
-                    HashSet<string> rowOrderSet = [..rowOrder];
-
-                    foreach (var row in para.Rows)
-                    {
-                        if (!rowOrderSet.Contains(row.ID.ToString()))
-                        {
-                            rowOrder.Add(row.ID.ToString());
-                            rowOrderSet.Add(row.ID.ToString());
-                        }
-                    }
-
-                    if (meta != null && ParamEditorScreen.EditorMode)
-                    {
-                        meta.AlternateRowOrders ??= [];
-                        if (defRowOrder == null)
-                            meta.AlternateRowOrders.Add(activeParam, [..rowOrder]);
-                        else if (defRowOrder.Count != rowOrder.Count)
-                            meta.AlternateRowOrders[activeParam] = [..rowOrder];
-                    }
-
-                    Dictionary<string, (int, Param.Row)> rowD = rows
-                        .Select((r, i) => (i, r))
-                        .ToDictionary(t => t.r.ID.ToString());
-
-                    foreach (string rowId in rowOrder)
-                    {
-                        if (!rowD.TryGetValue(rowId, out var row))
-                            continue;
-                        ParamView_RowList_Entry(selectionCache, row.Item1, activeParam, rows, row.Item2, vanillaDiffCache,
-                            auxDiffCaches, decorator, ref scrollTo, doFocus, false, compareCol, compareColProp,
-                            meta);
-                    }
-                } 
-                else if (!CFG.Current.Param_PinGroups_ShowOnlyPinnedRows)
+                if (!CFG.Current.Param_PinGroups_ShowOnlyPinnedRows)
                 {
                     for (var i = 0; i < rows.Count; i++)
                     {
@@ -938,191 +830,10 @@ public class ParamEditorView
 
         ImGui.PopStyleColor();
 
-        // Param Context Menu
-        if (ImGui.BeginPopupContextItem(r.ID.ToString()))
-        {
-            if (CFG.Current.Param_RowContextMenu_NameInput)
-            {
-                if (_selection.RowSelectionExists())
-                {
-                    var name = _selection.GetActiveRow().Name;
-                    if (name != null)
-                    {
-                        ImGui.InputText("##rowName", ref name, 255);
-                        _selection.GetActiveRow().Name = name;
-                    }
-                }
-            }
-
-            if (CFG.Current.Param_RowContextMenu_ShortcutTools)
-            {
-                if (ImGui.Selectable(@$"Copy selection ({KeyBindings.Current.PARAM_CopyToClipboard.HintText})", false,
-                        _selection.RowSelectionExists()
-                            ? ImGuiSelectableFlags.None
-                            : ImGuiSelectableFlags.Disabled))
-                {
-                    _paramEditor.CopySelectionToClipboard(_selection);
-                }
-
-                if (ImGui.Selectable(@$"Paste clipboard ({KeyBindings.Current.PARAM_PasteClipboard.HintText})", false,
-                        ParamBank.ClipboardRows.Any() ? ImGuiSelectableFlags.None : ImGuiSelectableFlags.Disabled))
-                {
-                    EditorCommandQueue.AddCommand(@"param/menu/ctrlVPopup");
-                }
-
-                if (ImGui.Selectable(@$"Delete selection ({KeyBindings.Current.CORE_DeleteSelectedEntry.HintText})", false,
-                        _selection.RowSelectionExists()
-                            ? ImGuiSelectableFlags.None
-                            : ImGuiSelectableFlags.Disabled))
-                {
-                    _paramEditor.DeleteSelection(_selection);
-                }
-
-                if (ImGui.Selectable(@$"Duplicate selection ({KeyBindings.Current.CORE_DuplicateSelectedEntry.HintText})", false,
-                        _selection.RowSelectionExists()
-                            ? ImGuiSelectableFlags.None
-                            : ImGuiSelectableFlags.Disabled))
-                {
-                    _paramEditor.Handler.DuplicateHandler();
-                }
-
-                if (ImGui.BeginMenu("Duplicate Row to Commutative Param", Smithbox.EditorHandler.ParamEditor.Handler.IsCommutativeParam()))
-                {
-                    Smithbox.EditorHandler.ParamEditor.Handler.DisplayCommutativeDuplicateMenu();
-
-                    ImGui.EndMenu();
-                }
-                UIHelper.ShowHoverTooltip($"Duplicates current selection to a commutative param.");
-
-                if (ImGui.Selectable(@$"Copy ID ({KeyBindings.Current.PARAM_CopyId.HintText})", false,
-                        _selection.RowSelectionExists()
-                            ? ImGuiSelectableFlags.None
-                            : ImGuiSelectableFlags.Disabled))
-                {
-                    _paramEditor.Handler.CopyRowDetailHandler(false);
-                }
-
-                if (ImGui.Selectable(@$"Copy ID and Name ({KeyBindings.Current.PARAM_CopyIdAndName.HintText})", false,
-                        _selection.RowSelectionExists()
-                            ? ImGuiSelectableFlags.None
-                            : ImGuiSelectableFlags.Disabled))
-                {
-                    _paramEditor.Handler.CopyRowDetailHandler(true);
-                }
-
-                ImGui.Separator();
-            }
-
-            if (CFG.Current.Param_RowContextMenu_PinOptions)
-            {
-                if (ImGui.Selectable((isPinned ? "Unpin " : "Pin ") + r.ID))
-                {
-                    if (!Smithbox.ProjectHandler.CurrentProject.Config.PinnedRows.ContainsKey(activeParam))
-                    {
-                        Smithbox.ProjectHandler.CurrentProject.Config.PinnedRows.Add(activeParam, new List<int>());
-                    }
-
-                    List<int> pinned = Smithbox.ProjectHandler.CurrentProject.Config.PinnedRows[activeParam];
-
-                    if (isPinned)
-                    {
-                        pinned.Remove(r.ID);
-                    }
-                    else if (!pinned.Contains(r.ID))
-                    {
-                        pinned.Add(r.ID);
-                    }
-                }
-
-                if(_selection.GetSelectedRows().Count > 0)
-                {
-                    if (ImGui.Selectable($"Pin Selection##pinSelection{r.ID}"))
-                    {
-                        foreach(var entry in _selection.GetSelectedRows())
-                        {
-                            if (!Smithbox.ProjectHandler.CurrentProject.Config.PinnedRows.ContainsKey(activeParam))
-                            {
-                                Smithbox.ProjectHandler.CurrentProject.Config.PinnedRows.Add(activeParam, new List<int>());
-                            }
-
-                            List<int> pinned = Smithbox.ProjectHandler.CurrentProject.Config.PinnedRows[activeParam];
-
-                            if (!pinned.Contains(entry.ID))
-                            {
-                                pinned.Add(entry.ID);
-                            }
-                        }
-                    }
-                }
-                if (_selection.GetSelectedRows().Count > 0)
-                {
-                    if (ImGui.Selectable($"Unpin Selection##unpinSelection{r.ID}"))
-                    {
-                        foreach (var entry in _selection.GetSelectedRows())
-                        {
-                            if (!Smithbox.ProjectHandler.CurrentProject.Config.PinnedRows.ContainsKey(activeParam))
-                            {
-                                Smithbox.ProjectHandler.CurrentProject.Config.PinnedRows.Add(activeParam, new List<int>());
-                            }
-
-                            List<int> pinned = Smithbox.ProjectHandler.CurrentProject.Config.PinnedRows[activeParam];
-
-                            if (pinned.Contains(entry.ID))
-                            {
-                                pinned.Remove(entry.ID);
-                            }
-                        }
-                    }
-                }
-
-                if (isPinned)
-                {
-                    EditorDecorations.PinListReorderOptions(Smithbox.ProjectHandler.CurrentProject.Config.PinnedRows[activeParam], r.ID);
-                }
-
-                if (ImGui.Selectable("Unpin all"))
-                {
-                    Smithbox.ProjectHandler.CurrentProject.Config.PinnedRows.Clear();
-                }
-
-                ImGui.Separator();
-            }
-
-            if (decorator != null)
-            {
-                decorator.DecorateContextMenuItems(r);
-            }
-
-            if (CFG.Current.Param_RowContextMenu_CompareOptions)
-            {
-                if (ImGui.Selectable("Compare..."))
-                {
-                    _selection.SetCompareRow(r);
-                }
-            }
-
-            if (CFG.Current.Param_RowContextMenu_ReverseLoopup)
-            {
-                EditorDecorations.ParamRefReverseLookupSelectables(_paramEditor, ParamBank.PrimaryBank, activeParam, r.ID);
-            }
-
-            if (CFG.Current.Param_RowContextMenu_CopyID)
-            {
-                if (ImGui.Selectable("Copy ID to clipboard"))
-                {
-                    PlatformUtils.Instance.SetClipboardText($"{r.ID}");
-                }
-            }
-            
-            if (ParamEditorScreen.EditorMode && !isPinned && CFG.Current.Param_AllowRowReorder && 
-                (meta?.AlternateRowOrders?.TryGetValue(activeParam, out var rowOrder) ?? false))
-            {
-                ImGui.Separator();
-                EditorDecorations.ListReorderOptions(rowOrder, r.ID.ToString());
-            }
-
-            ImGui.EndPopup();
-        }
+        ParamRowContextMenu.Display(
+            r, selectionCacheIndex, 
+            isPinned, activeParam, 
+            decorator, _selection, _paramEditor);
 
         if (decorator != null)
         {

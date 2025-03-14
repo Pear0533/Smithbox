@@ -26,6 +26,7 @@ public class MapEntityPropertyFieldMeta
     public bool PositionProperty { get; set; } = false;
     public bool RotationProperty { get; set; } = false;
     public bool ScaleProperty { get; set; } = false;
+    public bool EntityIdentifierProperty { get; set; } = false;
 
     // Meta
     public List<ParamRef> ParamRef { get; set; } = new List<ParamRef>();
@@ -51,6 +52,8 @@ public class MapEntityPropertyFieldMeta
     public bool ShowSoundList { get; set; } = false;
 
     public bool ShowEventFlagList { get; set; } = false;
+
+    public bool ShowTalkList { get; set; } = false;
 
     public bool ShowModelLinkButton { get; set; } = false;
 
@@ -155,6 +158,13 @@ public class MapEntityPropertyFieldMeta
             ShowEventFlagList = true;
         }
 
+        // Talk List
+        XmlAttribute tShowTalkList = entry.Attributes["TalkAlias"];
+        if (tShowTalkList != null)
+        {
+            ShowTalkList = true;
+        }
+
         // Spawn State List
         XmlAttribute tSpawnStateList = entry.Attributes["SpawnStates"];
         if (tSpawnStateList != null)
@@ -195,6 +205,13 @@ public class MapEntityPropertyFieldMeta
         if (IsRotation != null)
         {
             RotationProperty = true;
+        }
+
+        // Entity ID Property
+        XmlAttribute EntityIdentifier = entry.Attributes["EntityIdentifier"];
+        if (EntityIdentifier != null)
+        {
+            EntityIdentifierProperty = true;
         }
 
         // Scale Property
