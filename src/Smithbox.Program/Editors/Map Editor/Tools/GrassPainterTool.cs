@@ -18,6 +18,13 @@ namespace StudioCore.Editors.MapEditor;
 
 public class GrassPainterTool
 {
+    private sealed class GrassParamOption
+    {
+        public int ParamId { get; init; }
+        public string DisplayLabel { get; init; }
+        public string SearchLabel { get; init; }
+    }
+
     private sealed class GrassPreviewSettings
     {
         public string ModelName { get; init; }
@@ -90,6 +97,7 @@ public class GrassPainterTool
     private readonly HashSet<Entity> _strokeEntities = new();
     private readonly List<ViewportAction> _strokeActions = new();
     private readonly Dictionary<int, string> _grassParamNames = new();
+    private string _grassParamSearch = "";
 
     private GrassPaintTarget _hoveredTarget;
     private Entity _hoveredEntity;
@@ -172,8 +180,13 @@ public class GrassPainterTool
 
         if (_operation is GrassPaintOperation.PaintSlot)
         {
-            ImGui.InputInt("Paint Grass Param", ref _paintGrassParamId);
-            _paletteSlots[_selectedSlot] = _paintGrassParamId;
+            DrawGrassParamPicker();
+
+            var paintGrassParamId = _paintGrassParamId;
+            if (ImGui.InputInt("Paint Grass Param ID", ref paintGrassParamId))
+            {
+                SetPaintGrassParam(paintGrassParamId);
+            }
         }
 
         ImGui.Separator();
@@ -542,6 +555,95 @@ public class GrassPainterTool
         _paintGrassParamId = _paletteSlots[_selectedSlot];
     }
 
+    private void SetPaintGrassParam(int grassParamId)
+    {
+        _paintGrassParamId = Math.Max(0, grassParamId);
+        _paletteSlots[_selectedSlot] = _paintGrassParamId;
+    }
+
+    private void DrawGrassParamPicker()
+    {
+        ImGui.SetNextItemWidth(-1);
+        if (!ImGui.BeginCombo("Grass Type", GetGrassParamDisplay(_paintGrassParamId)))
+        {
+            return;
+        }
+
+        ImGui.InputTextWithHint("##grassPainterParamSearch", "Search row id, name, or model...", ref _grassParamSearch, 128);
+        ImGui.Separator();
+
+        if (ImGui.Selectable("0 (empty)", _paintGrassParamId == 0))
+        {
+            SetPaintGrassParam(0);
+        }
+
+        if (ImGui.BeginChild("##grassPainterParamList", new Vector2(0.0f, 260.0f)))
+        {
+            foreach (var option in GetGrassParamOptions())
+            {
+                if (!MatchesGrassParamSearch(option))
+                {
+                    continue;
+                }
+
+                var isSelected = option.ParamId == _paintGrassParamId;
+                if (ImGui.Selectable(option.DisplayLabel, isSelected))
+                {
+                    SetPaintGrassParam(option.ParamId);
+                }
+
+                if (isSelected)
+                {
+                    ImGui.SetItemDefaultFocus();
+                }
+            }
+
+            ImGui.EndChild();
+        }
+
+        ImGui.EndCombo();
+    }
+
+    private IEnumerable<GrassParamOption> GetGrassParamOptions()
+    {
+        var grassParam = Project.Handler?.ParamData?.PrimaryBank?.GetParamFromName("GrassTypeParam");
+        if (grassParam == null)
+        {
+            yield break;
+        }
+
+        foreach (var row in grassParam.Rows.Where(entry => entry.ID > 0).OrderBy(entry => entry.ID))
+        {
+            var rowName = row.Name?.Trim();
+            var models = BuildGrassParamModelSummary(row);
+            var displayLabel = string.IsNullOrWhiteSpace(rowName)
+                ? row.ID.ToString()
+                : $"{row.ID} ({rowName})";
+
+            if (!string.IsNullOrWhiteSpace(models))
+            {
+                displayLabel = $"{displayLabel} - {models}";
+            }
+
+            yield return new GrassParamOption
+            {
+                ParamId = row.ID,
+                DisplayLabel = displayLabel,
+                SearchLabel = $"{row.ID} {rowName} {models}".ToLowerInvariant()
+            };
+        }
+    }
+
+    private bool MatchesGrassParamSearch(GrassParamOption option)
+    {
+        if (string.IsNullOrWhiteSpace(_grassParamSearch))
+        {
+            return true;
+        }
+
+        return option.SearchLabel.Contains(_grassParamSearch.Trim().ToLowerInvariant(), StringComparison.Ordinal);
+    }
+
     private int[] GetOperationSlots(int[] currentSlots)
     {
         var nextSlots = currentSlots.ToArray();
@@ -635,14 +737,46 @@ public class GrassPainterTool
             paramData.PrimaryBank.Params.TryGetValue("GrassTypeParam", out var grassTypeParam))
         {
             var row = grassTypeParam.Rows.FirstOrDefault(entry => entry.ID == grassParamId);
-            if (row != null && !string.IsNullOrWhiteSpace(row.Name))
+            if (row != null)
             {
-                displayName = $"{grassParamId} ({row.Name})";
+                var rowName = row.Name?.Trim();
+                var modelSummary = BuildGrassParamModelSummary(row);
+
+                displayName = string.IsNullOrWhiteSpace(rowName)
+                    ? grassParamId.ToString()
+                    : $"{grassParamId} ({rowName})";
+
+                if (!string.IsNullOrWhiteSpace(modelSummary))
+                {
+                    displayName = $"{displayName} - {modelSummary}";
+                }
             }
         }
 
         _grassParamNames[grassParamId] = displayName;
         return displayName;
+    }
+
+    private string BuildGrassParamModelSummary(Param.Row row)
+    {
+        var modelNames = new[]
+        {
+            GetRowString(row, "model0Name"),
+            GetRowString(row, "simpleModelName"),
+            GetRowString(row, "model1Name")
+        }
+        .Where(name => !string.IsNullOrWhiteSpace(name))
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .Take(3)
+        .ToArray();
+
+        if (modelNames.Length > 0)
+        {
+            return string.Join(", ", modelNames);
+        }
+
+        var textureName = FirstNonEmpty(GetRowString(row, "flatTextureName"), GetRowString(row, "billboardTextureName"));
+        return string.IsNullOrWhiteSpace(textureName) ? "" : textureName;
     }
 
     private bool TryValidatePaintConfiguration(int[] currentSlots, out string message)
@@ -697,8 +831,7 @@ public class GrassPainterTool
             return;
         }
 
-        _paintGrassParamId = firstUsableRow.ID;
-        _paletteSlots[_selectedSlot] = _paintGrassParamId;
+        SetPaintGrassParam(firstUsableRow.ID);
         SetStrokeStatus(new Vector4(0.45f, 0.9f, 0.55f, 1.0f), $"Seeded paint value from GrassTypeParam: {GetGrassParamDisplay(_paintGrassParamId)}.");
     }
 
