@@ -328,12 +328,26 @@ public class VulkanViewport : IViewport
         UpdateGrids(ray);
 
         bool kbbusy = false;
+        bool suppressSelection = false;
+        bool suppressCameraInput = false;
+
+        if (Owner is MapUniverse mapUniverse)
+        {
+            suppressSelection = mapUniverse.View.GrassPainterTool.HandleViewportInteraction(this,
+                out suppressCameraInput);
+        }
 
         if (!Gizmos.IsMouseBusy() && !BoxSelection.IsBoxSelecting() && CanInteract && MouseInViewport())
         {
-            kbbusy = ViewportCamera.UpdateInput(window, dt);
+            if (!suppressCameraInput)
+            {
+                kbbusy = ViewportCamera.UpdateInput(window, dt);
+            }
 
-            ClickSelection.HandlePickingRequest();
+            if (!suppressSelection)
+            {
+                ClickSelection.HandlePickingRequest();
+            }
         }
 
         //Gizmos.DebugGui();

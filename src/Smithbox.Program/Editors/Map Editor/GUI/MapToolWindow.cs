@@ -187,6 +187,11 @@ public class MapToolWindow
                 activeView.DisplayGroupTool.OnToolWindow();
             }
 
+            if (CFG.Current.Interface_MapEditor_Tool_GrassPainter)
+            {
+                activeView.GrassPainterTool.OnToolWindow();
+            }
+
             if (CFG.Current.Interface_MapEditor_Tool_EntityIdentifier)
             {
                 activeView.EntityIdentifierTool.OnToolWindow();
@@ -323,6 +328,12 @@ public class MapToolWindow
                 CFG.Current.Interface_MapEditor_Tool_DisplayGroups = !CFG.Current.Interface_MapEditor_Tool_DisplayGroups;
             }
             UIHelper.ShowActiveStatus(CFG.Current.Interface_MapEditor_Tool_DisplayGroups);
+
+            if (ImGui.MenuItem("Grass Painter"))
+            {
+                CFG.Current.Interface_MapEditor_Tool_GrassPainter = !CFG.Current.Interface_MapEditor_Tool_GrassPainter;
+            }
+            UIHelper.ShowActiveStatus(CFG.Current.Interface_MapEditor_Tool_GrassPainter);
 
             if (ImGui.MenuItem("Entity Identifiers"))
             {

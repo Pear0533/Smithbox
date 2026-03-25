@@ -388,6 +388,7 @@ public class CFG
     public bool Interface_MapEditor_Tool_GridConfiguration = true;
     public bool Interface_MapEditor_Tool_ModelSelector = true;
     public bool Interface_MapEditor_Tool_DisplayGroups = true;
+    public bool Interface_MapEditor_Tool_GrassPainter = true;
     public bool Interface_MapEditor_Tool_EntityIdentifier = true;
     public bool Interface_MapEditor_Tool_MapValidator = true;
     public bool Interface_MapEditor_Tool_MapModelInsight = true;

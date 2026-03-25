@@ -48,6 +48,8 @@ public class ViewportOverlay
             {
                 mapUniverse.View.PositionIncrementTool.DisplayViewportMovementIncrement();
             }
+
+            mapUniverse.View.GrassPainterTool.DrawViewportOverlay();
         }
 
         // Profiling

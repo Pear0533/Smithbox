@@ -77,6 +77,7 @@ public class MapEditorView
     public PositionIncrementTool PositionIncrementTool;
     public ModelSelectorTool ModelSelectorTool;
     public DisplayGroupTool DisplayGroupTool;
+    public GrassPainterTool GrassPainterTool;
     public SelectionGroupTool SelectionGroupTool;
     public PrefabTool PrefabTool;
     public NavmeshBuilderTool NavmeshBuilderTool;
@@ -162,6 +163,7 @@ public class MapEditorView
         PositionIncrementTool = new PositionIncrementTool(this, project);
         AutomaticPreviewTool = new AutomaticPreviewTool(this, project);
         DisplayGroupTool = new DisplayGroupTool(this, project);
+        GrassPainterTool = new GrassPainterTool(this, project);
         GlobalSearchTool = new GlobalSearchTool(this, project);
         LocalSearchView = new LocalSearchTool(this, project);
         ModelSelectorTool = new ModelSelectorTool(this, project);

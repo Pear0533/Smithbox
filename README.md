@@ -6,7 +6,7 @@ Smithbox is a modding tool for Elden Ring, Elden Ring: Nightreign, Armored Core 
 [![Smithbox Discord](https://img.shields.io/badge/Discord%20-%237289DA.svg?&logo=discord&logoColor=white)](https://discord.gg/5p9bRKkK4J)
 
 ## Key Features
-- Map Editor: a visual editor for editing maps.
+- Map Editor: a visual editor for editing maps, including per-part grass slot painting for supported Elden Ring, Nightreign, and Armored Core VI map pieces/assets.
 - Model Editor: a model editor for viewing and editing models. Similar to the FLVER Editor.
 - Param Editor: a table editor for editing parameters, which contain most of the data that defines each game.
 - Text Editor: an editor for editing text localization.
