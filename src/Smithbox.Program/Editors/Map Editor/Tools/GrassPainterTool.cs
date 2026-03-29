@@ -109,6 +109,7 @@ public class GrassPainterTool
     private readonly List<DebugPrimitiveRenderableProxy> _brushPreviewMarkers = new();
     private readonly List<DebugPrimitiveRenderableProxy> _strokeTrailMarkers = new();
     private readonly List<List<MeshRenderableProxy>> _strokeTrailGrassPreviewGroups = new();
+    private readonly List<List<MeshRenderableProxy>> _committedGrassPreviewGroups = new();
     private readonly List<Vector3> _strokeTrailPositions = new();
     private readonly List<float> _strokeTrailScales = new();
     private readonly List<Vector3> _strokeTrailNormals = new();
@@ -122,6 +123,13 @@ public class GrassPainterTool
     private int _selectedSlot;
     private int _paintGrassParamId;
     private GrassPaintOperation _operation;
+    private readonly Dictionary<string, RaycastMeshData> _raycastMeshCache = new();
+
+    private sealed class RaycastMeshData
+    {
+        public Vector3[] Vertices;
+        public int[] Indices;
+    }
 
     public GrassPainterTool(MapEditorView view, ProjectEntry project)
     {
@@ -301,6 +309,14 @@ public class GrassPainterTool
             ImGui.Text($"Visible Stamps: {_strokeTrailPositions.Count}");
         }
 
+        var committedMeshCount = 0;
+        foreach (var g in _committedGrassPreviewGroups)
+            committedMeshCount += g.Count;
+        if (_committedGrassPreviewGroups.Count > 0)
+        {
+            ImGui.Text($"Committed Previews: {_committedGrassPreviewGroups.Count} groups, {committedMeshCount} meshes");
+        }
+
         var activePreviewSummary = GetActivePreviewSummary();
         if (!string.IsNullOrWhiteSpace(activePreviewSummary))
         {
@@ -388,7 +404,7 @@ public class GrassPainterTool
                 _strokeInProgress = true;
                 _strokeEntities.Clear();
                 _strokeActions.Clear();
-                ClearStrokeVisuals();
+                CommitStrokePreviewGroups();
                 LockStrokeTarget();
             }
 
@@ -685,6 +701,7 @@ public class GrassPainterTool
         {
             _strokeEntities.Clear();
             ClearStrokeLock();
+            CommitStrokePreviewGroups();
             if (_paintEnabled)
             {
                 SetStrokeStatus(new Vector4(0.95f, 0.45f, 0.45f, 1.0f), "Stroke finished without writing any grass changes.");
@@ -694,6 +711,7 @@ public class GrassPainterTool
 
         var strokeAction = new GrassPaintStrokeAction(_strokeActions.ToList(), _strokeActions.Count, true);
         View.ViewportActionManager.ExecuteAction(strokeAction);
+        CommitStrokePreviewGroups();
         SetStrokeStatus(new Vector4(0.45f, 0.9f, 0.55f, 1.0f), $"Committed grass stroke across {_strokeActions.Count} target(s).");
 
         _strokeActions.Clear();
@@ -715,7 +733,30 @@ public class GrassPainterTool
         _strokeActions.Clear();
         _strokeEntities.Clear();
         ClearStrokeLock();
-        ClearStrokeVisuals();
+        DisposeGrassPreviewGroups(_strokeTrailGrassPreviewGroups);
+        _strokeTrailPositions.Clear();
+        _strokeTrailScales.Clear();
+        _strokeTrailNormals.Clear();
+        SetMarkersVisible(_strokeTrailMarkers, false);
+    }
+
+    private void CommitStrokePreviewGroups()
+    {
+        if (_strokeTrailGrassPreviewGroups.Count == 0)
+        {
+            _strokeTrailPositions.Clear();
+            _strokeTrailScales.Clear();
+            _strokeTrailNormals.Clear();
+            SetMarkersVisible(_strokeTrailMarkers, false);
+            return;
+        }
+
+        _committedGrassPreviewGroups.AddRange(_strokeTrailGrassPreviewGroups);
+        _strokeTrailGrassPreviewGroups.Clear();
+        _strokeTrailPositions.Clear();
+        _strokeTrailScales.Clear();
+        _strokeTrailNormals.Clear();
+        SetMarkersVisible(_strokeTrailMarkers, false);
     }
 
     private string GetGrassParamDisplay(int grassParamId)
@@ -930,17 +971,247 @@ public class GrassPainterTool
         var ray = viewport.GetRay(mousePosition.X - viewport.X, mousePosition.Y - viewport.Y);
         var bounds = previewEntity.GetBounds();
 
+        // Use bounds for radius computation.
+        var extents = bounds.Max - bounds.Min;
+        var horizontalRadius = MathF.Max(extents.X, extents.Z) * 0.06f;
+        previewRadius = Math.Clamp(horizontalRadius, 0.35f, 4.0f);
+
+        // Try CPU ray-mesh intersection for accurate surface placement.
+        if (TryRaycastEntityMesh(ray, previewEntity, out var meshHitDist, out var meshHitNormal))
+        {
+            previewPosition = ray.Origin + ray.Direction * meshHitDist;
+            previewNormal = meshHitNormal;
+            previewPosition += previewNormal * MathF.Max(previewRadius * 0.08f, 0.03f);
+            return true;
+        }
+
+        // Fall back to bounding box intersection.
         if (!TryIntersectBounds(ray, bounds, out var hitDistance, out previewNormal))
         {
             return false;
         }
 
-        var extents = bounds.Max - bounds.Min;
-        var horizontalRadius = MathF.Max(extents.X, extents.Z) * 0.06f;
-        previewRadius = Math.Clamp(horizontalRadius, 0.35f, 4.0f);
         previewPosition = ray.Origin + ray.Direction * hitDistance;
         previewPosition += previewNormal * MathF.Max(previewRadius * 0.08f, 0.03f);
         return true;
+    }
+
+    private bool TryRaycastEntityMesh(Ray ray, Entity entity, out float hitDistance, out Vector3 hitNormal)
+    {
+        hitDistance = 0.0f;
+        hitNormal = Vector3.UnitY;
+
+        var meshData = GetOrLoadRaycastMesh(entity);
+        if (meshData == null)
+        {
+            return false;
+        }
+
+        // Transform ray into entity local space.
+        var worldMatrix = entity.GetWorldMatrix();
+        if (!Matrix4x4.Invert(worldMatrix, out var invWorld))
+        {
+            return false;
+        }
+
+        var localOrigin = Vector3.Transform(ray.Origin, invWorld);
+        var localDir = Vector3.Normalize(Vector3.TransformNormal(ray.Direction, invWorld));
+        var localRay = new Ray(localOrigin, localDir);
+
+        if (!ViewportUtils.RayMeshIntersection(localRay, meshData.Vertices, meshData.Indices, ViewportUtils.RayCastCull.CullNone, out var localDist))
+        {
+            return false;
+        }
+
+        // Compute hit point in world space.
+        var localHitPoint = localOrigin + localDir * localDist;
+        var worldHitPoint = Vector3.Transform(localHitPoint, worldMatrix);
+        hitDistance = Vector3.Distance(ray.Origin, worldHitPoint);
+
+        // Compute triangle normal at the hit point.
+        for (var i = 0; i < meshData.Indices.Length; i += 3)
+        {
+            ref var v0 = ref meshData.Vertices[meshData.Indices[i]];
+            ref var v1 = ref meshData.Vertices[meshData.Indices[i + 1]];
+            ref var v2 = ref meshData.Vertices[meshData.Indices[i + 2]];
+
+            if (localRay.Intersects(ref v0, ref v1, ref v2, out var triDist) && MathF.Abs(triDist - localDist) < 0.001f)
+            {
+                var localNormal = Vector3.Normalize(Vector3.Cross(v1 - v0, v2 - v0));
+                hitNormal = Vector3.Normalize(Vector3.TransformNormal(localNormal, worldMatrix));
+                break;
+            }
+        }
+
+        return true;
+    }
+
+    private RaycastMeshData GetOrLoadRaycastMesh(Entity entity)
+    {
+        var modelName = entity.CurrentModelName;
+        if (string.IsNullOrWhiteSpace(modelName))
+        {
+            return null;
+        }
+
+        // Build a cache key from model name + map ID for map pieces.
+        var cacheKey = modelName;
+        string mapId = null;
+        if (entity is MsbEntity msbEntity)
+        {
+            mapId = msbEntity.MapID;
+            if (!string.IsNullOrWhiteSpace(mapId) && modelName.StartsWith("m", StringComparison.OrdinalIgnoreCase))
+            {
+                cacheKey = $"{mapId}/{modelName}";
+            }
+        }
+
+        if (_raycastMeshCache.TryGetValue(cacheKey, out var cached))
+        {
+            return cached;
+        }
+
+        // Resolve the model to a ResourceDescriptor.
+        if (!TryResolveEntityModelAsset(entity, modelName, mapId, out var asset))
+        {
+            _raycastMeshCache[cacheKey] = null;
+            return null;
+        }
+
+        // Get the relative path for VFS read.
+        var relativePath = PathBuilder.GetRelativePath(Project, asset.AssetVirtualPath);
+        if (string.IsNullOrWhiteSpace(relativePath))
+        {
+            _raycastMeshCache[cacheKey] = null;
+            return null;
+        }
+
+        // Read and parse the FLVER.
+        try
+        {
+            var flver = TryReadFlverFromVFS(relativePath);
+            if (flver == null || flver.Meshes == null || flver.Meshes.Count == 0)
+            {
+                _raycastMeshCache[cacheKey] = null;
+                return null;
+            }
+
+            // Extract vertices and triangulated indices from all meshes.
+            var allVertices = new List<Vector3>();
+            var allIndices = new List<int>();
+
+            foreach (var mesh in flver.Meshes)
+            {
+                if (mesh.Vertices == null || mesh.Vertices.Count == 0)
+                {
+                    continue;
+                }
+
+                var vertexOffset = allVertices.Count;
+                foreach (var vert in mesh.Vertices)
+                {
+                    allVertices.Add(vert.Position);
+                }
+
+                foreach (var faceSet in mesh.FaceSets)
+                {
+                    if (faceSet.Flags != FLVER2.FaceSet.FSFlags.None &&
+                        faceSet.Flags != FLVER2.FaceSet.FSFlags.EdgeCompressed)
+                    {
+                        continue;
+                    }
+
+                    var triangulated = faceSet.Triangulate(mesh.Vertices.Count < ushort.MaxValue);
+                    foreach (var idx in triangulated)
+                    {
+                        if (idx < 0 || idx >= mesh.Vertices.Count)
+                        {
+                            continue;
+                        }
+
+                        allIndices.Add(idx + vertexOffset);
+                    }
+                }
+            }
+
+            if (allVertices.Count == 0 || allIndices.Count < 3)
+            {
+                _raycastMeshCache[cacheKey] = null;
+                return null;
+            }
+
+            var meshData = new RaycastMeshData
+            {
+                Vertices = allVertices.ToArray(),
+                Indices = allIndices.ToArray()
+            };
+            _raycastMeshCache[cacheKey] = meshData;
+            return meshData;
+        }
+        catch
+        {
+            _raycastMeshCache[cacheKey] = null;
+            return null;
+        }
+    }
+
+    private FLVER2 TryReadFlverFromVFS(string relativePath)
+    {
+        var fileData = Project.VFS.FS.ReadFile(relativePath);
+        if (fileData == null || fileData.Value.Length <= 1)
+        {
+            return null;
+        }
+
+        // If the file is a loose FLVER, parse directly.
+        if (relativePath.EndsWith(".flver", StringComparison.OrdinalIgnoreCase) ||
+            relativePath.EndsWith(".flver.dcx", StringComparison.OrdinalIgnoreCase) ||
+            relativePath.EndsWith(".flv", StringComparison.OrdinalIgnoreCase) ||
+            relativePath.EndsWith(".flv.dcx", StringComparison.OrdinalIgnoreCase))
+        {
+            return FLVER2.Read(fileData.Value);
+        }
+
+        // Otherwise it's a binder archive — extract the FLVER from inside it.
+        var binder = BND4.Read(fileData.Value);
+        foreach (var file in binder.Files)
+        {
+            if (file.Name != null &&
+                (file.Name.EndsWith(".flver", StringComparison.OrdinalIgnoreCase) ||
+                 file.Name.EndsWith(".flv", StringComparison.OrdinalIgnoreCase)))
+            {
+                return FLVER2.Read(file.Bytes);
+            }
+        }
+
+        return null;
+    }
+
+    private bool TryResolveEntityModelAsset(Entity entity, string modelName, string mapId, out ResourceDescriptor asset)
+    {
+        asset = default;
+
+        if (modelName.StartsWith("m", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(mapId))
+        {
+            var amapid = PathBuilder.GetAssetMapID(Project, mapId);
+            var mapAssetName = ModelLocator.MapModelNameToAssetName(Project, amapid, modelName);
+            asset = ModelLocator.GetMapModel(Project, amapid, mapAssetName, mapAssetName);
+            return !string.IsNullOrWhiteSpace(asset.AssetVirtualPath) && asset.AssetVirtualPath != "null";
+        }
+
+        if (modelName.StartsWith("o", StringComparison.OrdinalIgnoreCase) || modelName.StartsWith("AEG", StringComparison.OrdinalIgnoreCase))
+        {
+            asset = ModelLocator.GetObjModel(Project, modelName, modelName);
+            return !string.IsNullOrWhiteSpace(asset.AssetVirtualPath) && asset.AssetVirtualPath != "null";
+        }
+
+        if (modelName.StartsWith("c", StringComparison.OrdinalIgnoreCase))
+        {
+            asset = ModelLocator.GetChrModel(Project, modelName, modelName);
+            return !string.IsNullOrWhiteSpace(asset.AssetVirtualPath) && asset.AssetVirtualPath != "null";
+        }
+
+        return false;
     }
 
     private bool TryIntersectBounds(Ray ray, BoundingBox bounds, out float distance, out Vector3 normal)
@@ -1028,7 +1299,8 @@ public class GrassPainterTool
             _brushPreviewProxy = null;
             DisposeMarkers(_brushPreviewMarkers);
             DisposeMarkers(_strokeTrailMarkers);
-            DisposeGrassPreviewGroups();
+            DisposeGrassPreviewGroups(_strokeTrailGrassPreviewGroups);
+            DisposeGrassPreviewGroups(_committedGrassPreviewGroups);
             _strokeTrailPositions.Clear();
             _strokeTrailScales.Clear();
             _strokeTrailNormals.Clear();
@@ -1056,8 +1328,9 @@ public class GrassPainterTool
 
         _strokeTrailPositions.Clear();
         _strokeTrailScales.Clear();
-    _strokeTrailNormals.Clear();
-    DisposeGrassPreviewGroups();
+        _strokeTrailNormals.Clear();
+        DisposeGrassPreviewGroups(_strokeTrailGrassPreviewGroups);
+        DisposeGrassPreviewGroups(_committedGrassPreviewGroups);
     }
 
     private void HideBrushPreview()
@@ -1157,15 +1430,6 @@ public class GrassPainterTool
 
             UpdateMarker(_strokeTrailMarkers[index], previewEntity, _strokeTrailPositions[index], _strokeTrailScales[index], previewColor, 68.0f);
         }
-    }
-
-    private void ClearStrokeVisuals()
-    {
-        _strokeTrailPositions.Clear();
-        _strokeTrailScales.Clear();
-        _strokeTrailNormals.Clear();
-        SetMarkersVisible(_strokeTrailMarkers, false);
-        DisposeGrassPreviewGroups();
     }
 
     private void UpdateMarker(DebugPrimitiveRenderableProxy marker, Entity previewEntity, Vector3 position, float scale, Color previewColor, float alpha)
@@ -1543,14 +1807,14 @@ public class GrassPainterTool
         return start + (end - start) * t;
     }
 
-    private void DisposeGrassPreviewGroups()
+    private void DisposeGrassPreviewGroups(List<List<MeshRenderableProxy>> previewGroups)
     {
-        foreach (var group in _strokeTrailGrassPreviewGroups)
+        foreach (var group in previewGroups)
         {
             DisposeGrassPreviewGroup(group);
         }
 
-        _strokeTrailGrassPreviewGroups.Clear();
+        previewGroups.Clear();
     }
 
     private void DisposeGrassPreviewGroup(List<MeshRenderableProxy> group)

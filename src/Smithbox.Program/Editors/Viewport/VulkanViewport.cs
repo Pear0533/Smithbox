@@ -323,10 +323,6 @@ public class VulkanViewport : IViewport
         CursorX = (int)pos.X; // - X;
         CursorY = (int)pos.Y; // - Y;
 
-        Gizmos.Update(ray, CanInteract && MouseInViewport(), IsActiveViewport);
-
-        UpdateGrids(ray);
-
         bool kbbusy = false;
         bool suppressSelection = false;
         bool suppressCameraInput = false;
@@ -336,6 +332,10 @@ public class VulkanViewport : IViewport
             suppressSelection = mapUniverse.View.GrassPainterTool.HandleViewportInteraction(this,
                 out suppressCameraInput);
         }
+
+        Gizmos.Update(ray, CanInteract && MouseInViewport() && !suppressSelection, IsActiveViewport);
+
+        UpdateGrids(ray);
 
         if (!Gizmos.IsMouseBusy() && !BoxSelection.IsBoxSelecting() && CanInteract && MouseInViewport())
         {
