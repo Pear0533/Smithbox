@@ -23,6 +23,7 @@ public class GrassPainterTool
         public int ParamId { get; init; }
         public string DisplayLabel { get; init; }
         public string SearchLabel { get; init; }
+        public bool HasTextures { get; init; }
     }
 
     private sealed class GrassPreviewSettings
@@ -98,6 +99,8 @@ public class GrassPainterTool
     private readonly List<ViewportAction> _strokeActions = new();
     private readonly Dictionary<int, string> _grassParamNames = new();
     private string _grassParamSearch = "";
+    private List<GrassParamOption> _cachedGrassParamOptions;
+    private int _cachedGrassParamVersion = -1;
 
     private GrassPaintTarget _hoveredTarget;
     private Entity _hoveredEntity;
@@ -603,10 +606,17 @@ public class GrassPainterTool
                 }
 
                 var isSelected = option.ParamId == _paintGrassParamId;
+
+                if (!option.HasTextures)
+                    ImGui.PushStyleColor(ImGuiCol.Text, new Vector4(0.6f, 0.6f, 0.6f, 1.0f));
+
                 if (ImGui.Selectable(option.DisplayLabel, isSelected))
                 {
                     SetPaintGrassParam(option.ParamId);
                 }
+
+                if (!option.HasTextures)
+                    ImGui.PopStyleColor();
 
                 if (isSelected)
                 {
@@ -620,14 +630,17 @@ public class GrassPainterTool
         ImGui.EndCombo();
     }
 
-    private IEnumerable<GrassParamOption> GetGrassParamOptions()
+    private List<GrassParamOption> GetGrassParamOptions()
     {
         var grassParam = Project.Handler?.ParamData?.PrimaryBank?.GetParamFromName("GrassTypeParam");
         if (grassParam == null)
-        {
-            yield break;
-        }
+            return [];
 
+        var rowCount = grassParam.Rows.Count;
+        if (_cachedGrassParamOptions != null && _cachedGrassParamVersion == rowCount)
+            return _cachedGrassParamOptions;
+
+        var options = new List<GrassParamOption>();
         foreach (var row in grassParam.Rows.Where(entry => entry.ID > 0).OrderBy(entry => entry.ID))
         {
             var rowName = row.Name?.Trim();
@@ -641,13 +654,18 @@ public class GrassPainterTool
                 displayLabel = $"{displayLabel} - {models}";
             }
 
-            yield return new GrassParamOption
+            options.Add(new GrassParamOption
             {
                 ParamId = row.ID,
                 DisplayLabel = displayLabel,
-                SearchLabel = $"{row.ID} {rowName} {models}".ToLowerInvariant()
-            };
+                SearchLabel = $"{row.ID} {rowName} {models}".ToLowerInvariant(),
+                HasTextures = CheckRowHasTextures(row)
+            });
         }
+
+        _cachedGrassParamOptions = options;
+        _cachedGrassParamVersion = rowCount;
+        return options;
     }
 
     private bool MatchesGrassParamSearch(GrassParamOption option)
@@ -818,6 +836,48 @@ public class GrassPainterTool
 
         var textureName = FirstNonEmpty(GetRowString(row, "flatTextureName"), GetRowString(row, "billboardTextureName"));
         return string.IsNullOrWhiteSpace(textureName) ? "" : textureName;
+    }
+
+    private bool CheckModelHasTextures(string modelName)
+    {
+        if (string.IsNullOrWhiteSpace(modelName))
+            return false;
+
+        ResourceDescriptor texDesc;
+        if (modelName.StartsWith("AEG", StringComparison.OrdinalIgnoreCase))
+            texDesc = TextureLocator.GetAssetTextureVirtualPath(Project, modelName);
+        else if (modelName.StartsWith("o", StringComparison.OrdinalIgnoreCase))
+            texDesc = TextureLocator.GetObjectTextureVirtualPath(Project, modelName);
+        else
+            return false;
+
+        var virtPath = texDesc.AssetVirtualPath ?? texDesc.AssetArchiveVirtualPath;
+        if (string.IsNullOrWhiteSpace(virtPath))
+            return false;
+
+        var relativePath = PathBuilder.GetRelativePath(Project, virtPath);
+        if (string.IsNullOrWhiteSpace(relativePath))
+            return false;
+
+        return Project.VFS.FS.FileExists(relativePath);
+    }
+
+    private bool CheckRowHasTextures(Param.Row row)
+    {
+        var modelNames = new[]
+        {
+            GetRowString(row, "model0Name"),
+            GetRowString(row, "simpleModelName"),
+            GetRowString(row, "model1Name")
+        };
+
+        foreach (var name in modelNames)
+        {
+            if (!string.IsNullOrWhiteSpace(name) && CheckModelHasTextures(name))
+                return true;
+        }
+
+        return false;
     }
 
     private bool TryValidatePaintConfiguration(int[] currentSlots, out string message)
@@ -1662,7 +1722,7 @@ public class GrassPainterTool
             return group;
         }
 
-        EnsurePreviewAssetLoaded(asset);
+        EnsurePreviewAssetLoaded(asset, previewSettings.ModelName);
 
         var instanceCount = previewSettings.GetPreviewInstanceCount();
         for (var instanceIndex = 0; instanceIndex < instanceCount; instanceIndex++)
@@ -1704,33 +1764,64 @@ public class GrassPainterTool
         return false;
     }
 
-    private void EnsurePreviewAssetLoaded(ResourceDescriptor asset)
+    private void EnsurePreviewAssetLoaded(ResourceDescriptor asset, string modelName = null)
     {
         if (string.IsNullOrWhiteSpace(asset.AssetVirtualPath) || asset.AssetVirtualPath == "null")
         {
             return;
         }
 
-        if (ResourceManager.IsResourceLoaded(asset.AssetVirtualPath, AccessLevel.AccessGPUOptimizedOnly))
+        if (!ResourceManager.IsResourceLoaded(asset.AssetVirtualPath, AccessLevel.AccessGPUOptimizedOnly))
         {
-            return;
+            var job = ResourceManager.CreateNewJob("Loading grass preview mesh");
+            if (!string.IsNullOrWhiteSpace(asset.AssetArchiveVirtualPath) && asset.AssetArchiveVirtualPath != "null")
+            {
+                job.AddLoadArchiveTask(asset.AssetArchiveVirtualPath, AccessLevel.AccessGPUOptimizedOnly, false, ResourceType.Flver);
+            }
+            else
+            {
+                job.AddLoadFileTask(asset.AssetVirtualPath, AccessLevel.AccessGPUOptimizedOnly);
+            }
+
+            Task loadTask = job.Complete();
+            if (View.Universe.HasProcessedMapLoad)
+            {
+                loadTask.Wait();
+            }
         }
 
-        var job = ResourceManager.CreateNewJob("Loading grass preview mesh");
-        if (!string.IsNullOrWhiteSpace(asset.AssetArchiveVirtualPath) && asset.AssetArchiveVirtualPath != "null")
+        if (!string.IsNullOrWhiteSpace(modelName))
         {
-            job.AddLoadArchiveTask(asset.AssetArchiveVirtualPath, AccessLevel.AccessGPUOptimizedOnly, false, ResourceType.Flver);
+            EnsurePreviewTexturesLoaded(modelName);
         }
+    }
+
+    private void EnsurePreviewTexturesLoaded(string modelName)
+    {
+        ResourceDescriptor texDesc;
+        if (modelName.StartsWith("AEG", StringComparison.OrdinalIgnoreCase))
+            texDesc = TextureLocator.GetAssetTextureVirtualPath(Project, modelName);
+        else if (modelName.StartsWith("o", StringComparison.OrdinalIgnoreCase))
+            texDesc = TextureLocator.GetObjectTextureVirtualPath(Project, modelName);
         else
-        {
-            job.AddLoadFileTask(asset.AssetVirtualPath, AccessLevel.AccessGPUOptimizedOnly);
-        }
+            return;
 
-        Task loadTask = job.Complete();
+        if (!texDesc.IsValid())
+            return;
+
+        var virtPath = texDesc.AssetVirtualPath ?? texDesc.AssetArchiveVirtualPath;
+        if (ResourceManager.IsResourceLoaded(virtPath, AccessLevel.AccessGPUOptimizedOnly))
+            return;
+
+        var texJob = ResourceManager.CreateNewJob("Loading grass preview textures");
+        if (texDesc.AssetArchiveVirtualPath != null)
+            texJob.AddLoadArchiveTask(texDesc.AssetArchiveVirtualPath, AccessLevel.AccessGPUOptimizedOnly, false, ResourceType.Flver);
+        else if (texDesc.AssetVirtualPath != null)
+            texJob.AddLoadFileTask(texDesc.AssetVirtualPath, AccessLevel.AccessGPUOptimizedOnly);
+
+        Task texTask = texJob.Complete();
         if (View.Universe.HasProcessedMapLoad)
-        {
-            loadTask.Wait();
-        }
+            texTask.Wait();
     }
 
     private Matrix4x4 BuildGrassPreviewTransform(Vector3 centerPosition, Vector3 normal, float previewRadius, GrassPreviewSettings previewSettings, int stampIndex, int instanceIndex)
