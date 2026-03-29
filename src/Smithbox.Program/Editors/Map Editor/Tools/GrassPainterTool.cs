@@ -831,7 +831,12 @@ public class GrassPainterTool
 
         if (modelNames.Length > 0)
         {
-            return string.Join(", ", modelNames);
+            var parts = modelNames.Select(name =>
+            {
+                var alias = AliasHelper.GetAssetAlias(Project, name.ToLowerInvariant());
+                return string.IsNullOrEmpty(alias) ? name : $"{name} ({alias})";
+            });
+            return string.Join(", ", parts);
         }
 
         var textureName = FirstNonEmpty(GetRowString(row, "flatTextureName"), GetRowString(row, "billboardTextureName"));
