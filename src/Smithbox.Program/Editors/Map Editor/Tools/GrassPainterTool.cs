@@ -70,7 +70,8 @@ public class GrassPainterTool
         PaintSlot,
         ApplyPalette,
         ClearSlot,
-        ClearAll
+        ClearAll,
+        OrientDirection
     }
 
     private enum HoveredTargetState
@@ -89,7 +90,8 @@ public class GrassPainterTool
         "Paint Selected Slot",
         "Apply Full Palette",
         "Clear Selected Slot",
-        "Clear All Slots"
+        "Clear All Slots",
+        "Orient Direction"
     ];
 
     private const int BrushPreviewMarkerCount = 13;
@@ -116,6 +118,8 @@ public class GrassPainterTool
     private readonly List<DebugPrimitiveRenderableProxy> _strokeTrailMarkers = new();
     private readonly List<List<MeshRenderableProxy>> _strokeTrailGrassPreviewGroups = new();
     private readonly List<List<MeshRenderableProxy>> _committedGrassPreviewGroups = new();
+    private readonly List<GrassGroupStampData> _strokeTrailGroupMeta = new();
+    private readonly List<GrassGroupStampData> _committedGroupMeta = new();
     private readonly List<Vector3> _strokeTrailPositions = new();
     private readonly List<float> _strokeTrailScales = new();
     private readonly List<Vector3> _strokeTrailNormals = new();
@@ -139,11 +143,18 @@ public class GrassPainterTool
     private int _orientationInclinationMax = 90;
     private int _orientationInclinationJitter;
 
+    private Vector3 _lastOrientBrushWorldPos;
+    private bool _hasLastOrientBrushPos;
+    private float _smoothedOrientAngle;
+    private DebugPrimitiveRenderableProxy _directionArrowProxy;
+
     private sealed class RaycastMeshData
     {
         public Vector3[] Vertices;
         public int[] Indices;
     }
+
+    private record struct GrassGroupStampData(Vector3 Position, Vector3 Normal, float Radius, int StampIndex, int ParamId);
 
     public GrassPainterTool(MapEditorView view, ProjectEntry project)
     {
@@ -167,21 +178,6 @@ public class GrassPainterTool
 
         TrySeedDefaultPaintValue();
 
-        if (ImGui.Checkbox("Enable Viewport Painting", ref _paintEnabled) && _paintEnabled)
-        {
-            TrySeedDefaultPaintValue();
-        }
-        ImGui.TextWrapped("When enabled, left drag in the active viewport applies the configured grass data to supported map pieces and assets.");
-        ImGui.TextWrapped("This tool edits per-part grass slot data on grass-capable MSB parts. Empty grass-capable assets can be painted from scratch by assigning their first non-zero slot through this tool.");
-        ImGui.TextWrapped("This does not author a separate terrain-density resource.");
-        ImGui.TextWrapped("Viewport preview attempts to spawn temporary grass clumps from the selected GrassTypeParam model fields. Billboard- and flat-only grass still fall back to surface stamps.");
-
-        var activePreviewSummary = GetActivePreviewSummary();
-        if (!string.IsNullOrWhiteSpace(activePreviewSummary))
-        {
-            ImGui.TextWrapped($"Preview Source: {activePreviewSummary}");
-        }
-
         var operationIndex = (int)_operation;
         if (ImGui.Combo("Stroke Operation", ref operationIndex, OperationLabels, OperationLabels.Length))
         {
@@ -190,6 +186,30 @@ public class GrassPainterTool
             {
                 _paintGrassParamId = _paletteSlots[_selectedSlot];
             }
+
+            if (_operation == GrassPaintOperation.OrientDirection)
+            {
+                _orientationOverride = true;
+                _orientationRandomDirection = false;
+                _orientationRange = 0.0f;
+                LoadOrientationFromParam();
+            }
+        }
+
+        if (_operation == GrassPaintOperation.OrientDirection)
+        {
+            ImGui.TextWrapped("Drag in the viewport to set grass direction. The arrow and grass preview follow your stroke direction. On release, the angle is written to the selected GrassTypeParam row.");
+        }
+        else
+        {
+            if (ImGui.Checkbox("Enable Viewport Painting", ref _paintEnabled) && _paintEnabled)
+            {
+                TrySeedDefaultPaintValue();
+            }
+            ImGui.TextWrapped("When enabled, left drag in the active viewport applies the configured grass data to supported map pieces and assets.");
+            ImGui.TextWrapped("This tool edits per-part grass slot data on grass-capable MSB parts. Empty grass-capable assets can be painted from scratch by assigning their first non-zero slot through this tool.");
+            ImGui.TextWrapped("This does not author a separate terrain-density resource.");
+            ImGui.TextWrapped("Viewport preview attempts to spawn temporary grass clumps from the selected GrassTypeParam model fields. Billboard- and flat-only grass still fall back to surface stamps.");
         }
 
         if (_operation is GrassPaintOperation.PaintSlot or GrassPaintOperation.ClearSlot)
@@ -200,7 +220,17 @@ public class GrassPainterTool
             }
         }
 
-        if (_operation is GrassPaintOperation.PaintSlot)
+        if (_operation == GrassPaintOperation.OrientDirection)
+        {
+            DrawGrassParamPicker();
+
+            var paintGrassParamId = _paintGrassParamId;
+            if (ImGui.InputInt("Target Grass Param ID", ref paintGrassParamId))
+            {
+                SetPaintGrassParam(paintGrassParamId);
+            }
+        }
+        else if (_operation == GrassPaintOperation.PaintSlot)
         {
             DrawGrassParamPicker();
 
@@ -209,6 +239,12 @@ public class GrassPainterTool
             {
                 SetPaintGrassParam(paintGrassParamId);
             }
+        }
+
+        var activePreviewSummary = GetActivePreviewSummary();
+        if (!string.IsNullOrWhiteSpace(activePreviewSummary))
+        {
+            ImGui.TextWrapped($"Preview Source: {activePreviewSummary}");
         }
 
         ImGui.Separator();
@@ -424,6 +460,13 @@ public class GrassPainterTool
             ImGui.Text($"Paint Value: {GetGrassParamDisplay(_paintGrassParamId)}");
         }
 
+        if (_operation == GrassPaintOperation.OrientDirection)
+        {
+            var angleDeg = _orientationAngleRad * 180.0f / MathF.PI;
+            if (angleDeg < 0) angleDeg += 360.0f;
+            ImGui.Text($"Direction: {angleDeg:F0}\u00B0 | Param: {GetGrassParamDisplay(_paintGrassParamId)}");
+        }
+
         ImGui.Text($"Targets: {GetTargetFilterLabel()}");
 
         if (_strokeInProgress)
@@ -477,7 +520,10 @@ public class GrassPainterTool
     {
         suppressCameraInput = false;
 
-        if (!_paintEnabled || !GrassPaintAdapter.SupportsProject(Project.Descriptor.ProjectType))
+        var isOrientMode = _operation == GrassPaintOperation.OrientDirection;
+        var isToolActive = isOrientMode || _paintEnabled;
+
+        if (!isToolActive || !GrassPaintAdapter.SupportsProject(Project.Descriptor.ProjectType))
         {
             if (_strokeInProgress)
             {
@@ -533,9 +579,17 @@ public class GrassPainterTool
                 _strokeActions.Clear();
                 CommitStrokePreviewGroups();
                 LockStrokeTarget();
+
+                if (_operation == GrassPaintOperation.OrientDirection)
+                {
+                    _hasLastOrientBrushPos = false;
+                }
             }
 
-            PaintHoveredTarget();
+            if (_operation == GrassPaintOperation.OrientDirection)
+                OrientFromBrushMovement(viewport);
+            else
+                PaintHoveredTarget();
         }
 
         return true;
@@ -632,6 +686,108 @@ public class GrassPainterTool
         _strokeEntities.Add(_hoveredTarget.Entity);
         _strokeActions.Add(action);
         SetStrokeStatus(new Vector4(0.45f, 0.9f, 0.55f, 1.0f), $"Prepared grass change for {_hoveredTarget.Entity.Name}.");
+    }
+
+    private void OrientFromBrushMovement(VulkanViewport viewport)
+    {
+        var previewEntity = _lockedStrokeEntity ?? _hoveredEntity;
+        if (previewEntity == null)
+            return;
+
+        if (!TryGetBrushPreviewAnchor(viewport, previewEntity, out var brushPos, out var brushRadius, out var brushNormal))
+            return;
+
+        if (!_hasLastOrientBrushPos)
+        {
+            _lastOrientBrushWorldPos = brushPos;
+            _hasLastOrientBrushPos = true;
+            SetStrokeStatus(new Vector4(0.65f, 0.85f, 1.0f, 1.0f), "Drag to set grass direction...");
+            return;
+        }
+
+        var delta = brushPos - _lastOrientBrushWorldPos;
+
+        // Project the movement delta onto the surface tangent plane
+        var normalDot = Vector3.Dot(delta, brushNormal);
+        var tangentDelta = delta - brushNormal * normalDot;
+
+        if (tangentDelta.LengthSquared() < 0.001f)
+            return;
+
+        _lastOrientBrushWorldPos = brushPos;
+
+        // Compute yaw angle from the tangent-plane direction (XZ plane for mostly-flat surfaces)
+        var direction = Vector3.Normalize(tangentDelta);
+        var rawAngle = MathF.Atan2(direction.X, direction.Z);
+
+        // Smooth the angle to avoid jitter (exponential moving average on unit circle)
+        if (_hasLastOrientBrushPos)
+        {
+            var smoothing = 0.35f;
+            var dSin = MathF.Sin(rawAngle) * smoothing + MathF.Sin(_smoothedOrientAngle) * (1.0f - smoothing);
+            var dCos = MathF.Cos(rawAngle) * smoothing + MathF.Cos(_smoothedOrientAngle) * (1.0f - smoothing);
+            _smoothedOrientAngle = MathF.Atan2(dSin, dCos);
+        }
+        else
+        {
+            _smoothedOrientAngle = rawAngle;
+        }
+
+        // Update the orientation override so previews reflect the direction in real-time
+        _orientationOverride = true;
+        _orientationRandomDirection = false;
+        _orientationAngleRad = _smoothedOrientAngle;
+        _orientationRange = 0.0f;
+
+        // Invalidate cached preview settings so they're rebuilt with new angle
+        _cachedGrassParamOptions = null;
+
+        // Rotate existing grass previews in real-time as the brush moves
+        RebuildCommittedPreviewTransforms(brushPos, brushRadius);
+
+        var angleDeg = _smoothedOrientAngle * 180.0f / MathF.PI;
+        if (angleDeg < 0) angleDeg += 360.0f;
+        SetStrokeStatus(new Vector4(0.65f, 0.85f, 1.0f, 1.0f), $"Orienting grass: {angleDeg:F0}\u00B0");
+    }
+
+    private void CommitOrientStroke()
+    {
+        _hasLastOrientBrushPos = false;
+        WriteOrientationToParam();
+        RebuildCommittedPreviewTransforms();
+        CommitStrokePreviewGroups();
+        ClearStrokeLock();
+        _strokeEntities.Clear();
+        _strokeActions.Clear();
+
+        var angleDeg = _orientationAngleRad * 180.0f / MathF.PI;
+        if (angleDeg < 0) angleDeg += 360.0f;
+        SetStrokeStatus(new Vector4(0.45f, 0.9f, 0.55f, 1.0f), $"Committed grass orientation: {angleDeg:F0}\u00B0 to GrassTypeParam.");
+    }
+
+    private void RebuildCommittedPreviewTransforms(Vector3? brushCenter = null, float brushRadius = 0f)
+    {
+        if (!TryGetActiveGrassPreviewSettings(out var settings, out _))
+            return;
+
+        var targetParamId = settings.SourceParamId;
+        var maxDistSq = brushCenter.HasValue ? brushRadius * brushRadius * 4f : 0f;
+
+        for (var i = 0; i < _committedGrassPreviewGroups.Count && i < _committedGroupMeta.Count; i++)
+        {
+            var meta = _committedGroupMeta[i];
+            if (meta.ParamId != targetParamId)
+                continue;
+
+            if (brushCenter.HasValue && Vector3.DistanceSquared(meta.Position, brushCenter.Value) > maxDistSq)
+                continue;
+
+            var group = _committedGrassPreviewGroups[i];
+            for (var j = 0; j < group.Count; j++)
+            {
+                group[j].World = BuildGrassPreviewTransform(meta.Position, meta.Normal, meta.Radius, settings, meta.StampIndex, j);
+            }
+        }
     }
 
     private void ApplyToSelection()
@@ -839,6 +995,12 @@ public class GrassPainterTool
     {
         _strokeInProgress = false;
 
+        if (_operation == GrassPaintOperation.OrientDirection)
+        {
+            CommitOrientStroke();
+            return;
+        }
+
         if (_strokeActions.Count == 0)
         {
             _strokeEntities.Clear();
@@ -872,10 +1034,12 @@ public class GrassPainterTool
         }
 
         _strokeInProgress = false;
+        _hasLastOrientBrushPos = false;
         _strokeActions.Clear();
         _strokeEntities.Clear();
         ClearStrokeLock();
         DisposeGrassPreviewGroups(_strokeTrailGrassPreviewGroups);
+        _strokeTrailGroupMeta.Clear();
         _strokeTrailPositions.Clear();
         _strokeTrailScales.Clear();
         _strokeTrailNormals.Clear();
@@ -894,7 +1058,9 @@ public class GrassPainterTool
         }
 
         _committedGrassPreviewGroups.AddRange(_strokeTrailGrassPreviewGroups);
+        _committedGroupMeta.AddRange(_strokeTrailGroupMeta);
         _strokeTrailGrassPreviewGroups.Clear();
+        _strokeTrailGroupMeta.Clear();
         _strokeTrailPositions.Clear();
         _strokeTrailScales.Clear();
         _strokeTrailNormals.Clear();
@@ -1138,11 +1304,46 @@ public class GrassPainterTool
 
         UpdateBrushSurfaceMarkers(previewEntity, previewPosition, previewRadius, previewNormal, previewColor);
 
-        if (_strokeInProgress)
+        UpdateDirectionArrow(previewPosition, previewRadius, previewNormal);
+
+        if (_strokeInProgress && _operation != GrassPaintOperation.OrientDirection)
         {
             AddStrokeTrailStamp(previewPosition, previewRadius, previewNormal);
             UpdateStrokeTrailMarkers(previewEntity, previewColor);
         }
+    }
+
+    private void UpdateDirectionArrow(Vector3 position, float brushRadius, Vector3 normal)
+    {
+        if (_directionArrowProxy == null)
+            return;
+
+        // Show the arrow when in orient mode, or when override is on and not random
+        var showArrow = _operation == GrassPaintOperation.OrientDirection
+            || (_orientationOverride && !_orientationRandomDirection);
+
+        if (!showArrow)
+        {
+            _directionArrowProxy.Visible = false;
+            return;
+        }
+
+        // The arrow points along +Z in local space. We need to orient it so +Z points
+        // in the direction indicated by _orientationAngleRad on the surface tangent plane.
+        var arrowScale = Math.Clamp(brushRadius * 0.8f, 0.3f, 2.5f);
+
+        // Build a rotation that:
+        // 1) Aligns arrow's local +Y to the surface normal (so the arrow lies on the surface)
+        // 2) Rotates around the normal so +Z points in the orientation direction
+        var alignRotation = CreateAlignmentRotation(normal);
+        var yawRotation = Quaternion.CreateFromAxisAngle(normal, _orientationAngleRad);
+        var rotation = Quaternion.Normalize(yawRotation * alignRotation);
+
+        _directionArrowProxy.BaseColor = Color.Cyan;
+        _directionArrowProxy.World = Matrix4x4.CreateScale(arrowScale)
+            * Matrix4x4.CreateFromQuaternion(rotation)
+            * Matrix4x4.CreateTranslation(position + normal * 0.05f);
+        _directionArrowProxy.Visible = true;
     }
 
     private bool TryGetBrushPreviewAnchor(VulkanViewport viewport, Entity previewEntity, out Vector3 previewPosition, out float previewRadius, out Vector3 previewNormal)
@@ -1481,15 +1682,19 @@ public class GrassPainterTool
         }
 
         _brushPreviewProxy?.Dispose();
+        _directionArrowProxy?.Dispose();
         _brushPreviewScene = scene;
 
         if (scene == null)
         {
             _brushPreviewProxy = null;
+            _directionArrowProxy = null;
             DisposeMarkers(_brushPreviewMarkers);
             DisposeMarkers(_strokeTrailMarkers);
             DisposeGrassPreviewGroups(_strokeTrailGrassPreviewGroups);
             DisposeGrassPreviewGroups(_committedGrassPreviewGroups);
+            _strokeTrailGroupMeta.Clear();
+            _committedGroupMeta.Clear();
             _strokeTrailPositions.Clear();
             _strokeTrailScales.Clear();
             _strokeTrailNormals.Clear();
@@ -1520,6 +1725,14 @@ public class GrassPainterTool
         _strokeTrailNormals.Clear();
         DisposeGrassPreviewGroups(_strokeTrailGrassPreviewGroups);
         DisposeGrassPreviewGroups(_committedGrassPreviewGroups);
+        _strokeTrailGroupMeta.Clear();
+        _committedGroupMeta.Clear();
+
+        var arrowPrim = new DbgPrimWireArrow("orient_direction", Transform.Default, Color.Cyan);
+        _directionArrowProxy = new DebugPrimitiveRenderableProxy(scene.OpaqueRenderables, arrowPrim);
+        _directionArrowProxy.RenderOverlay = true;
+        _directionArrowProxy.Visible = false;
+        _directionArrowProxy.DrawGroups = new DrawGroup();
     }
 
     private void HideBrushPreview()
@@ -1527,6 +1740,11 @@ public class GrassPainterTool
         if (_brushPreviewProxy != null)
         {
             _brushPreviewProxy.Visible = false;
+        }
+
+        if (_directionArrowProxy != null)
+        {
+            _directionArrowProxy.Visible = false;
         }
 
         SetMarkersVisible(_brushPreviewMarkers, false);
@@ -1593,6 +1811,8 @@ public class GrassPainterTool
             {
                 DisposeGrassPreviewGroup(_strokeTrailGrassPreviewGroups[0]);
                 _strokeTrailGrassPreviewGroups.RemoveAt(0);
+                if (_strokeTrailGroupMeta.Count > 0)
+                    _strokeTrailGroupMeta.RemoveAt(0);
             }
         }
 
@@ -1602,8 +1822,10 @@ public class GrassPainterTool
 
         if (_lockedStrokeEntity != null && TryGetActiveGrassPreviewSettings(out var previewSettings, out _))
         {
-            var previewGroup = CreateGrassPreviewGroup(_lockedStrokeEntity, previewPosition, previewNormal, previewRadius, previewSettings, _strokeTrailPositions.Count - 1);
+            var stampIndex = _strokeTrailPositions.Count - 1;
+            var previewGroup = CreateGrassPreviewGroup(_lockedStrokeEntity, previewPosition, previewNormal, previewRadius, previewSettings, stampIndex);
             _strokeTrailGrassPreviewGroups.Add(previewGroup);
+            _strokeTrailGroupMeta.Add(new GrassGroupStampData(previewPosition, previewNormal, previewRadius, stampIndex, previewSettings.SourceParamId));
         }
     }
 
@@ -1765,7 +1987,7 @@ public class GrassPainterTool
 
     private int GetPreviewGrassParamId()
     {
-        if (_operation == GrassPaintOperation.PaintSlot)
+        if (_operation is GrassPaintOperation.PaintSlot or GrassPaintOperation.OrientDirection)
         {
             return _paintGrassParamId;
         }
@@ -2113,7 +2335,10 @@ public class GrassPainterTool
 
     private bool IsViewportPaintingEnabled()
     {
-        return _paintEnabled && GrassPaintAdapter.SupportsProject(Project.Descriptor.ProjectType);
+        if (!GrassPaintAdapter.SupportsProject(Project.Descriptor.ProjectType))
+            return false;
+
+        return _paintEnabled || _operation == GrassPaintOperation.OrientDirection;
     }
 
     private string GetTargetFilterLabel()
