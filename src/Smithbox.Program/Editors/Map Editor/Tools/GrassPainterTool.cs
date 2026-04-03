@@ -39,6 +39,9 @@ public class GrassPainterTool
         public float HeightScaleMax { get; init; }
         public float OrientationAngle { get; init; }
         public float OrientationRange { get; init; }
+        public float NormalInfluence { get; init; }
+        public float InclinationMax { get; init; }
+        public float InclinationJitter { get; init; }
         public string Summary { get; init; }
 
         public int GetPreviewInstanceCount()
@@ -127,6 +130,14 @@ public class GrassPainterTool
     private int _paintGrassParamId;
     private GrassPaintOperation _operation;
     private readonly Dictionary<string, RaycastMeshData> _raycastMeshCache = new();
+
+    private bool _orientationOverride;
+    private bool _orientationRandomDirection = true;
+    private float _orientationAngleRad;
+    private float _orientationRange = 180.0f;
+    private int _orientationNormalInfluence = 50;
+    private int _orientationInclinationMax = 90;
+    private int _orientationInclinationJitter;
 
     private sealed class RaycastMeshData
     {
@@ -225,6 +236,9 @@ public class GrassPainterTool
         ImGui.SameLine();
         ImGui.Checkbox("Affect Assets", ref _allowAssets);
 
+        ImGui.Separator();
+        DrawOrientationOverridePanel();
+
         if (ImGui.Button("Load From Selection"))
         {
             LoadFromSelection();
@@ -276,6 +290,116 @@ public class GrassPainterTool
         else
         {
             ImGui.TextWrapped("Hover a supported terrain part in the viewport to inspect its current grass slots.");
+        }
+    }
+
+    private void DrawOrientationOverridePanel()
+    {
+        ImGui.Checkbox("Override Orientation", ref _orientationOverride);
+        if (!_orientationOverride)
+        {
+            ImGui.TextDisabled("Orientation values are read from the selected GrassTypeParam row.");
+            return;
+        }
+
+        ImGui.Indent();
+
+        // Direction
+        ImGui.Checkbox("Random Direction", ref _orientationRandomDirection);
+        if (!_orientationRandomDirection)
+        {
+            ImGui.SliderAngle("Direction", ref _orientationAngleRad, 0.0f, 360.0f);
+        }
+
+        ImGui.SliderFloat("Direction Spread", ref _orientationRange, 0.0f, 180.0f, "%.0f\u00B0");
+
+        // Tilt / Inclination
+        ImGui.SliderInt("Normal Influence %", ref _orientationNormalInfluence, 0, 100);
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip("How much the surface slope affects grass tilt. 0 = always upright, 100 = fully follows surface normal.");
+        }
+
+        ImGui.SliderInt("Max Tilt Angle", ref _orientationInclinationMax, 0, 180);
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip("Maximum angle grass can lean from vertical, in degrees.");
+        }
+
+        ImGui.SliderInt("Tilt Jitter", ref _orientationInclinationJitter, 0, 180);
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip("Random tilt variation per instance, in degrees.");
+        }
+
+        ImGui.Spacing();
+        if (ImGui.Button("Load from Param"))
+        {
+            LoadOrientationFromParam();
+        }
+
+        ImGui.SameLine();
+        if (ImGui.Button("Write to Param"))
+        {
+            WriteOrientationToParam();
+        }
+
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.SetTooltip("Writes the current orientation overrides to the active GrassTypeParam row.\nThis affects ALL entities using this param row.");
+        }
+
+        ImGui.Unindent();
+    }
+
+    private void LoadOrientationFromParam()
+    {
+        var activeParamId = GetPreviewGrassParamId();
+        if (activeParamId <= 0)
+            return;
+
+        var grassParam = Project.Handler?.ParamData?.PrimaryBank?.GetParamFromName("GrassTypeParam");
+        var row = grassParam?.Rows.FirstOrDefault(entry => entry.ID == activeParamId);
+        if (row == null)
+            return;
+
+        var angle = GetRowFloat(row, "orientationAngle", -1.0f);
+        _orientationRandomDirection = angle < 0.0f;
+        _orientationAngleRad = angle < 0.0f ? 0.0f : angle * MathF.PI / 180.0f;
+        _orientationRange = MathF.Max(GetRowFloat(row, "orientationRange", -1.0f), 0.0f);
+        _orientationNormalInfluence = GetRowInt(row, "normalInfluence", 50);
+        _orientationInclinationMax = GetRowInt(row, "inclinationMax", 90);
+        _orientationInclinationJitter = GetRowInt(row, "inclinationJitter", 0);
+    }
+
+    private void WriteOrientationToParam()
+    {
+        var activeParamId = GetPreviewGrassParamId();
+        if (activeParamId <= 0)
+            return;
+
+        var grassParam = Project.Handler?.ParamData?.PrimaryBank?.GetParamFromName("GrassTypeParam");
+        var row = grassParam?.Rows.FirstOrDefault(entry => entry.ID == activeParamId);
+        if (row == null)
+            return;
+
+        var angleDeg = _orientationRandomDirection ? -1.0f : _orientationAngleRad * 180.0f / MathF.PI;
+
+        SetRowValue(row, "orientationAngle", angleDeg);
+        SetRowValue(row, "orientationRange", _orientationRandomDirection ? -1.0f : _orientationRange);
+        SetRowValue(row, "normalInfluence", (byte)Math.Clamp(_orientationNormalInfluence, 0, 100));
+        SetRowValue(row, "inclinationMax", (byte)Math.Clamp(_orientationInclinationMax, 0, 180));
+        SetRowValue(row, "inclinationJitter", (byte)Math.Clamp(_orientationInclinationJitter, 0, 180));
+
+        _cachedGrassParamOptions = null;
+    }
+
+    private void SetRowValue(Param.Row row, string fieldName, object value)
+    {
+        var cell = row[fieldName];
+        if (cell != null)
+        {
+            row.GetCellHandleOrThrow(fieldName).Value = value;
         }
     }
 
@@ -1601,6 +1725,22 @@ public class GrassPainterTool
             return false;
         }
 
+        var orientationAngle = _orientationOverride
+            ? (_orientationRandomDirection ? -1.0f : _orientationAngleRad * 180.0f / MathF.PI)
+            : GetRowFloat(row, "orientationAngle", -1.0f);
+        var orientationRange = _orientationOverride
+            ? (_orientationRandomDirection ? -1.0f : _orientationRange)
+            : GetRowFloat(row, "orientationRange", -1.0f);
+        var normalInfluence = _orientationOverride
+            ? _orientationNormalInfluence / 100.0f
+            : GetRowFloat(row, "normalInfluence", 50.0f) / 100.0f;
+        var inclinationMax = _orientationOverride
+            ? _orientationInclinationMax
+            : GetRowInt(row, "inclinationMax", 90);
+        var inclinationJitter = _orientationOverride
+            ? _orientationInclinationJitter
+            : GetRowInt(row, "inclinationJitter", 0);
+
         previewSettings = new GrassPreviewSettings
         {
             ModelName = selectedModelName,
@@ -1612,8 +1752,11 @@ public class GrassPainterTool
             WidthScaleMax = MathF.Max(GetRowFloat(row, "scaleBaseMax", 100.0f) / 100.0f, 0.1f),
             HeightScaleMin = MathF.Max(GetRowFloat(row, "scaleHeightMin", 100.0f) / 100.0f, 0.1f),
             HeightScaleMax = MathF.Max(GetRowFloat(row, "scaleHeightMax", 100.0f) / 100.0f, 0.1f),
-            OrientationAngle = GetRowFloat(row, "orientationAngle", -1.0f),
-            OrientationRange = GetRowFloat(row, "orientationRange", -1.0f),
+            OrientationAngle = orientationAngle,
+            OrientationRange = orientationRange,
+            NormalInfluence = Math.Clamp(normalInfluence, 0.0f, 1.0f),
+            InclinationMax = inclinationMax * MathF.PI / 180.0f,
+            InclinationJitter = inclinationJitter * MathF.PI / 180.0f,
             Summary = $"{sourceLabel}: {selectedModelName} from GrassTypeParam {activeParamId}"
         };
 
@@ -1839,6 +1982,8 @@ public class GrassPainterTool
         var widthSeed = GetPreviewSeed(stampIndex, instanceIndex, 2);
         var heightSeed = GetPreviewSeed(stampIndex, instanceIndex, 3);
         var yawSeed = GetPreviewSeed(stampIndex, instanceIndex, 4);
+        var tiltSeed = GetPreviewSeed(stampIndex, instanceIndex, 5);
+        var tiltDirSeed = GetPreviewSeed(stampIndex, instanceIndex, 6);
 
         var offsetDistance = MathF.Min(previewSettings.Spacing * (0.35f + radialSeed * 0.65f), previewRadius * 0.9f);
         var offsetAngle = angleSeed * MathF.Tau;
@@ -1849,8 +1994,23 @@ public class GrassPainterTool
         var upLift = normal * MathF.Max(heightScale * 0.02f, 0.01f);
 
         var targetPosition = centerPosition + offset + upLift;
-        var alignRotation = CreateAlignmentRotation(normal);
-        var yawRotation = Quaternion.CreateFromAxisAngle(normal, ResolvePreviewYaw(previewSettings, yawSeed));
+
+        // Compute effective up direction: blend between world-up and surface normal based on normalInfluence
+        var effectiveUp = Vector3.Normalize(Vector3.Lerp(Vector3.UnitY, normal, previewSettings.NormalInfluence));
+
+        // Apply tilt jitter: lean the effective up direction by a random amount within inclinationJitter
+        if (previewSettings.InclinationJitter > 0.0f)
+        {
+            var jitterAngle = (tiltSeed * 2.0f - 1.0f) * previewSettings.InclinationJitter;
+            jitterAngle = Math.Clamp(jitterAngle, -previewSettings.InclinationMax, previewSettings.InclinationMax);
+            var jitterDir = tiltDirSeed * MathF.Tau;
+            var jitterAxis = Vector3.Normalize(MathF.Cos(jitterDir) * tangent + MathF.Sin(jitterDir) * bitangent);
+            effectiveUp = Vector3.Transform(effectiveUp, Quaternion.CreateFromAxisAngle(jitterAxis, jitterAngle));
+            effectiveUp = Vector3.Normalize(effectiveUp);
+        }
+
+        var alignRotation = CreateAlignmentRotation(effectiveUp);
+        var yawRotation = Quaternion.CreateFromAxisAngle(effectiveUp, ResolvePreviewYaw(previewSettings, yawSeed));
         var rotation = Quaternion.Normalize(yawRotation * alignRotation);
 
         return Matrix4x4.CreateScale(widthScale, heightScale, widthScale) * Matrix4x4.CreateFromQuaternion(rotation) * Matrix4x4.CreateTranslation(targetPosition);
