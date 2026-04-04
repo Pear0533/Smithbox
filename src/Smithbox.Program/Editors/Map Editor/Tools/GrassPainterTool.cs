@@ -144,6 +144,7 @@ public class GrassPainterTool
     private int _orientationInclinationJitter;
 
     private Vector3 _lastOrientBrushWorldPos;
+    private float _lastOrientBrushRadius;
     private bool _hasLastOrientBrushPos;
     private float _smoothedOrientAngle;
     private DebugPrimitiveRenderableProxy _directionArrowProxy;
@@ -743,6 +744,7 @@ public class GrassPainterTool
         _cachedGrassParamOptions = null;
 
         // Rotate existing grass previews in real-time as the brush moves
+        _lastOrientBrushRadius = brushRadius;
         RebuildCommittedPreviewTransforms(brushPos, brushRadius);
 
         var angleDeg = _smoothedOrientAngle * 180.0f / MathF.PI;
@@ -752,9 +754,9 @@ public class GrassPainterTool
 
     private void CommitOrientStroke()
     {
-        _hasLastOrientBrushPos = false;
         WriteOrientationToParam();
-        RebuildCommittedPreviewTransforms();
+        RebuildCommittedPreviewTransforms(_lastOrientBrushWorldPos, _lastOrientBrushRadius);
+        _hasLastOrientBrushPos = false;
         CommitStrokePreviewGroups();
         ClearStrokeLock();
         _strokeEntities.Clear();
@@ -771,7 +773,7 @@ public class GrassPainterTool
             return;
 
         var targetParamId = settings.SourceParamId;
-        var maxDistSq = brushCenter.HasValue ? brushRadius * brushRadius * 4f : 0f;
+        var maxDistSq = brushCenter.HasValue ? brushRadius * brushRadius : 0f;
 
         for (var i = 0; i < _committedGrassPreviewGroups.Count && i < _committedGroupMeta.Count; i++)
         {
