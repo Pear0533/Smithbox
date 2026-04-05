@@ -139,7 +139,7 @@ public class GrassPainterTool
     private bool _orientationRandomDirection = true;
     private float _orientationAngleRad;
     private float _orientationRange = 180.0f;
-    private int _orientationNormalInfluence = 50;
+    private int _orientationNormalInfluence = 0;
     private int _orientationInclinationMax = 90;
     private int _orientationInclinationJitter;
 
@@ -199,7 +199,6 @@ public class GrassPainterTool
 
         if (_operation == GrassPaintOperation.OrientDirection)
         {
-            ImGui.TextWrapped("Drag in the viewport to set grass direction. The arrow and grass preview follow your stroke direction. On release, the angle is written to the selected GrassTypeParam row.");
         }
         else
         {
@@ -207,10 +206,6 @@ public class GrassPainterTool
             {
                 TrySeedDefaultPaintValue();
             }
-            ImGui.TextWrapped("When enabled, left drag in the active viewport applies the configured grass data to supported map pieces and assets.");
-            ImGui.TextWrapped("This tool edits per-part grass slot data on grass-capable MSB parts. Empty grass-capable assets can be painted from scratch by assigning their first non-zero slot through this tool.");
-            ImGui.TextWrapped("This does not author a separate terrain-density resource.");
-            ImGui.TextWrapped("Viewport preview attempts to spawn temporary grass clumps from the selected GrassTypeParam model fields. Billboard- and flat-only grass still fall back to surface stamps.");
         }
 
         if (_operation is GrassPaintOperation.PaintSlot or GrassPaintOperation.ClearSlot)
@@ -335,7 +330,6 @@ public class GrassPainterTool
         ImGui.Checkbox("Override Orientation", ref _orientationOverride);
         if (!_orientationOverride)
         {
-            ImGui.TextDisabled("Orientation values are read from the selected GrassTypeParam row.");
             return;
         }
 
@@ -1373,7 +1367,7 @@ public class GrassPainterTool
         {
             previewPosition = ray.Origin + ray.Direction * meshHitDist;
             previewNormal = meshHitNormal;
-            previewPosition += previewNormal * MathF.Max(previewRadius * 0.08f, 0.03f);
+            previewPosition += previewNormal * MathF.Max(previewRadius * 0.18f, 0.06f);
             return true;
         }
 
@@ -1384,7 +1378,7 @@ public class GrassPainterTool
         }
 
         previewPosition = ray.Origin + ray.Direction * hitDistance;
-        previewPosition += previewNormal * MathF.Max(previewRadius * 0.08f, 0.03f);
+        previewPosition += previewNormal * MathF.Max(previewRadius * 0.18f, 0.06f);
         return true;
     }
 
@@ -2215,7 +2209,7 @@ public class GrassPainterTool
 
         var widthScale = Lerp(previewSettings.WidthScaleMin, previewSettings.WidthScaleMax, widthSeed) * (float)Math.Clamp(previewRadius * 0.55f, 0.35f, 1.25f);
         var heightScale = Lerp(previewSettings.HeightScaleMin, previewSettings.HeightScaleMax, heightSeed) * (float)Math.Clamp(previewRadius * 0.75f, 0.45f, 1.75f);
-        var upLift = normal * MathF.Max(heightScale * 0.02f, 0.01f);
+        var upLift = normal * MathF.Max(previewRadius * 0.12f, 0.08f);
 
         var targetPosition = centerPosition + offset + upLift;
 
