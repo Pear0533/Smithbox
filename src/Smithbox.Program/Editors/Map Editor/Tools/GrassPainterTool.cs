@@ -135,7 +135,7 @@ public class GrassPainterTool
     private GrassPaintOperation _operation;
     private readonly Dictionary<string, RaycastMeshData> _raycastMeshCache = new();
 
-    private bool _orientationOverride;
+    private bool _orientationOverride = true;
     private bool _orientationRandomDirection = true;
     private float _orientationAngleRad;
     private float _orientationRange = 180.0f;
